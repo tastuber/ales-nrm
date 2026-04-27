@@ -1,0 +1,109 @@
+[build-system]
+requires = ["setuptools>=64", "setuptools-scm>=8"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ales-nrm"
+dynamic = ["version"]
+description = "Data reduction pipeline for LBTI/LMIRCam/ALES NRM observations"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+authors = [
+    {name = "Thomas Alexander Stuber", email = "tstuber@arizona.edu"},
+]
+keywords = [
+    "astronomy",
+    "interferometry",
+    "aperture-masking",
+    "infrared",
+    "LBTI",
+    "LMIRCam",
+    "ALES",
+]
+classifiers = [
+    "Development Status :: 1 - Planning",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Astronomy",
+]
+dependencies = [
+    "numpy>=1.24",
+    "scipy>=1.10",
+    "astropy>=5.3",
+    "matplotlib>=3.7",
+]
+
+[dependency-groups]
+test = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+]
+lint = [
+    "ruff>=0.4",
+]
+docs = [
+    "sphinx>=7.0",
+    "sphinx-rtd-theme>=2.0",
+]
+dev = [
+    {include-group = "test"},
+    {include-group = "lint"},
+    {include-group = "docs"},
+]
+
+[project.urls]
+Homepage = "https://github.com/yourusername/ales-nrm"
+Repository = "https://github.com/yourusername/ales-nrm.git"
+Issues = "https://github.com/yourusername/ales-nrm/issues"
+
+[tool.setuptools-scm]
+version_file = "src/ales_nrm/_version.py"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = [
+    "-v",
+    "--strict-markers",
+    "--tb=short",
+]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "requires_data: marks tests that need FITS data files",
+]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 79
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E",
+    "W",
+    "F",
+    "I",
+    "N",
+    "D",
+    "UP",
+    "B",
+    "NPY",
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.coverage.run]
+source = ["ales_nrm"]
+
+[tool.coverage.report]
+show_missing = true
+skip_empty = true
