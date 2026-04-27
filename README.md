@@ -9,6 +9,26 @@ Currently, the pipeline requires reduced image cubes from the ALES pipeline,
 thus fits files with the three dimensions spatial $\times$ spatial $\times$
 wavelength.
 
+## Installation
+
+I strongly recommend to execute the following steps in a virtual environment.\
+Execute in console:
+
+```
+git clone https://github.com/tastuber/ales-nrm.git
+cd ales_nrm
+```
+
+### User installation
+```
+pip install .
+```
+
+### Development installation
+```
+pip install -e . --group=dev
+```
+
 ## Status
 
 The project is in early development. If you would like to get involved, please contact [the owner](mailto:tstuber@arizona.edu).
