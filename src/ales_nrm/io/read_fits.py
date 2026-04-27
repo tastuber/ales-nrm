@@ -17,12 +17,42 @@ where YYMMDD is the UT date and NNNNNN is a six-digit running file number.
 """
 
 import logging
+import re
 from pathlib import Path
 
 import numpy as np
 from astropy.io import fits
 
 logger = logging.getLogger(__name__)
+
+# Regex pattern to extract the file number from the filename.
+# Matches both .fits and .fits.gz extensions.
+_FILENAME_PATTERN = re.compile(
+    r"^(?P<prefix>.+?)_(?P<number>\d{6})\.fits(?:\.gz)?$"
+)
+
+
+def parse_file_number(filepath: str | Path) -> int:
+    """Extract the running file number from a LMIRCam/ALES filename.
+
+    Args:
+        filepath: Path to the FITS file. Only the filename (stem) is
+            used for matching.
+
+    Returns:
+        The six-digit file number as an integer.
+
+    Raises:
+        ValueError: If the filename does not match the expected pattern.
+    """
+    name = Path(filepath).name
+    match = _FILENAME_PATTERN.match(name)
+    if match is None:
+        raise ValueError(
+            f"Filename '{name}' does not match the expected pattern "
+            f"'<prefix>_NNNNNN.fits[.gz]'."
+        )
+    return int(match.group("number"))
 
 
 def read_wavelengths(header: fits.Header) -> np.ndarray:
@@ -120,3 +150,63 @@ def read_cube(
     )
 
     return data, wavelengths, header
+
+
+def find_cubes(
+    directory: str | Path,
+    file_range: tuple[int, int] | None = None,
+    prefix: str = "cube_lm_",
+) -> list[Path]:
+    """Find cube FITS files in a directory, optionally by file number range.
+
+    Searches for files matching the naming pattern
+    ``<prefix>*_NNNNNN.fits[.gz]``. If ``file_range`` is provided, only
+    files whose running number falls within the inclusive range are
+    returned.
+
+    Args:
+        directory: Path to the directory containing FITS files.
+        file_range: Optional tuple ``(start, end)`` of file numbers
+            (inclusive). If ``None``, all matching files are returned.
+        prefix: Filename prefix to filter on. Default is
+            ``'cube_lm_'``.
+
+    Returns:
+        Sorted list of Path objects for the matching FITS files.
+
+    Raises:
+        FileNotFoundError: If the directory does not exist.
+    """
+    directory = Path(directory)
+    if not directory.is_dir():
+        raise FileNotFoundError(f"Directory not found: {directory}")
+
+    # Collect both .fits and .fits.gz
+    candidates = sorted(
+        list(directory.glob(f"{prefix}*.fits"))
+        + list(directory.glob(f"{prefix}*.fits.gz"))
+    )
+
+    if file_range is None:
+        return candidates
+
+    start, end = file_range
+    selected = []
+    for path in candidates:
+        try:
+            num = parse_file_number(path)
+        except ValueError:
+            logger.warning("Skipping file with unexpected name: %s", path.name)
+            continue
+        if start <= num <= end:
+            selected.append(path)
+
+    logger.info(
+        "Found %d cubes in %s for file range %d–%d.",
+        len(selected),
+        directory,
+        start,
+        end,
+    )
+
+    return selected
