@@ -4,10 +4,42 @@ import numpy as np
 import pytest
 
 from ales_nrm.io.read_fits import (
+    find_cubes,
+    parse_file_number,
     read_cube,
     read_wavelengths,
 )
 from tests.conftest import write_test_cube
+
+
+class TestParseFileNumber:
+    """Tests for parse_file_number."""
+
+    def test_standard_fits(self):
+        """Parse file number from a standard .fits filename."""
+        assert parse_file_number("cube_lm_251108_005265.fits") == 5265
+
+    def test_gzipped_fits(self):
+        """Parse file number from a gzipped .fits.gz filename."""
+        assert parse_file_number("cube_lm_251108_005265.fits.gz") == 5265
+
+    def test_full_path(self, tmp_path):
+        """Parse file number when given a full filesystem path."""
+        path = tmp_path / "cube_lm_251108_000001.fits"
+        assert parse_file_number(path) == 1
+
+    def test_leading_zeros(self):
+        """Parse file number correctly when it has leading zeros."""
+        assert parse_file_number("cube_lm_251108_000042.fits") == 42
+
+    def test_invalid_filename(self):
+        """Raise ValueError for a filename that does not match the pattern."""
+        with pytest.raises(ValueError, match="does not match"):
+            parse_file_number("not_a_valid_file.txt")
+
+    def test_raw_filename(self):
+        """Parse file number from a raw (non-cube) LMIRCam filename."""
+        assert parse_file_number("lm_251108_005265.fits.gz") == 5265
 
 
 class TestReadWavelengths:
@@ -92,3 +124,55 @@ class TestReadCube:
         _, _, header = read_cube(filepath)
         assert header["LBT_PARA"] == "15.5"
         assert header["TIME-OBS"] == "10:30:00.000"
+
+
+class TestFindCubes:
+    """Tests for find_cubes."""
+
+    def test_find_all(self, tmp_path, sample_cube, sample_wavelengths):
+        """Find all FITS cubes in a directory."""
+        for num in [5001, 5002, 5003]:
+            filepath = tmp_path / f"cube_lm_251108_{num:06d}.fits"
+            write_test_cube(filepath, sample_cube, sample_wavelengths)
+
+        paths = find_cubes(tmp_path)
+        assert len(paths) == 3
+
+    def test_find_with_range(self, tmp_path, sample_cube, sample_wavelengths):
+        """Find only files within the specified file number range."""
+        for num in [5001, 5002, 5003, 5004, 5005]:
+            filepath = tmp_path / f"cube_lm_251108_{num:06d}.fits"
+            write_test_cube(filepath, sample_cube, sample_wavelengths)
+
+        paths = find_cubes(tmp_path, file_range=(5002, 5004))
+        assert len(paths) == 3
+        numbers = [parse_file_number(p) for p in paths]
+        assert numbers == [5002, 5003, 5004]
+
+    def test_find_gzipped(self, tmp_path, sample_cube, sample_wavelengths):
+        """Find gzipped .fits.gz files."""
+        filepath = tmp_path / "cube_lm_251108_005001.fits.gz"
+        write_test_cube(filepath, sample_cube, sample_wavelengths)
+
+        paths = find_cubes(tmp_path)
+        assert len(paths) == 1
+
+    def test_sorted_output(self, tmp_path, sample_cube, sample_wavelengths):
+        """Return files sorted by file number."""
+        for num in [5003, 5001, 5002]:
+            filepath = tmp_path / f"cube_lm_251108_{num:06d}.fits"
+            write_test_cube(filepath, sample_cube, sample_wavelengths)
+
+        paths = find_cubes(tmp_path)
+        numbers = [parse_file_number(p) for p in paths]
+        assert numbers == sorted(numbers)
+
+    def test_directory_not_found(self, tmp_path):
+        """Raise FileNotFoundError for a nonexistent directory."""
+        with pytest.raises(FileNotFoundError):
+            find_cubes(tmp_path / "nonexistent")
+
+    def test_empty_directory(self, tmp_path):
+        """Return an empty list for a directory with no FITS files."""
+        paths = find_cubes(tmp_path)
+        assert paths == []
