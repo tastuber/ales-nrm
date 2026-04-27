@@ -7,6 +7,7 @@ from ales_nrm.io.read_fits import (
     find_cubes,
     parse_file_number,
     read_cube,
+    read_cubes,
     read_wavelengths,
 )
 from tests.conftest import write_test_cube
@@ -176,3 +177,150 @@ class TestFindCubes:
         """Return an empty list for a directory with no FITS files."""
         paths = find_cubes(tmp_path)
         assert paths == []
+
+
+class TestReadCubes:
+    """Tests for read_cubes."""
+
+    def test_read_multiple(self, tmp_path, sample_cube, sample_wavelengths):
+        """Read multiple cubes into a 4D array with correct shape."""
+        for num in [5001, 5002, 5003]:
+            filepath = tmp_path / f"cube_lm_251108_{num:06d}.fits"
+            write_test_cube(filepath, sample_cube, sample_wavelengths)
+
+        cubes, wavelengths, file_numbers, headers = read_cubes(tmp_path)
+
+        assert isinstance(cubes, np.ndarray)
+        assert cubes.ndim == 4
+        assert cubes.shape == (3, *sample_cube.shape)
+        assert len(headers) == 3
+        np.testing.assert_allclose(wavelengths, sample_wavelengths)
+
+    def test_read_with_range(self, tmp_path, sample_cube, sample_wavelengths):
+        """Read only cubes within the specified file number range."""
+        for num in [5001, 5002, 5003, 5004]:
+            filepath = tmp_path / f"cube_lm_251108_{num:06d}.fits"
+            write_test_cube(filepath, sample_cube, sample_wavelengths)
+
+        cubes, wavelengths, file_numbers, headers = read_cubes(
+            tmp_path,
+            file_range=(5002, 5003),
+        )
+        assert cubes.shape[0] == 2
+
+    def test_no_files_found(self, tmp_path):
+        """Raise FileNotFoundError when no matching files exist."""
+        with pytest.raises(FileNotFoundError, match="No FITS cubes found"):
+            read_cubes(tmp_path)
+
+    def test_inconsistent_wavelengths(
+        self,
+        tmp_path,
+        sample_cube,
+        sample_wavelengths,
+    ):
+        """Raise ValueError when wavelength grids differ between files."""
+        filepath1 = tmp_path / "cube_lm_251108_005001.fits"
+        write_test_cube(filepath1, sample_cube, sample_wavelengths)
+
+        shifted = sample_wavelengths + 0.5
+        filepath2 = tmp_path / "cube_lm_251108_005002.fits"
+        write_test_cube(filepath2, sample_cube, shifted)
+
+        with pytest.raises(ValueError, match="Wavelength grid"):
+            read_cubes(tmp_path)
+
+    def test_inconsistent_shape(
+        self,
+        tmp_path,
+        rng,
+        sample_wavelengths,
+    ):
+        """Raise ValueError when spatial dimensions differ between files."""
+        cube1 = rng.normal(size=(98, 63, 67))
+        filepath1 = tmp_path / "cube_lm_251108_005001.fits"
+        write_test_cube(filepath1, cube1, sample_wavelengths)
+
+        cube2 = rng.normal(size=(98, 50, 50))
+        filepath2 = tmp_path / "cube_lm_251108_005002.fits"
+        write_test_cube(filepath2, cube2, sample_wavelengths)
+
+        with pytest.raises(ValueError, match="Cube shape"):
+            read_cubes(tmp_path)
+
+    def test_data_values_preserved(
+        self,
+        tmp_path,
+        sample_cube,
+        sample_wavelengths,
+    ):
+        """Verify that pixel values are preserved through read/write."""
+        filepath = tmp_path / "cube_lm_251108_005001.fits"
+        write_test_cube(filepath, sample_cube, sample_wavelengths)
+
+        cubes, _, _, _ = read_cubes(tmp_path)
+
+        np.testing.assert_allclose(cubes[0], sample_cube)
+
+    def test_dtype_preserved(
+        self,
+        tmp_path,
+        sample_cube,
+        sample_wavelengths,
+    ):
+        """Test dtype output/input match after native byte-order conversion."""
+        filepath = tmp_path / "cube_lm_251108_005001.fits"
+        write_test_cube(filepath, sample_cube, sample_wavelengths)
+
+        cubes, _, _, _ = read_cubes(tmp_path)
+
+        assert cubes.dtype == sample_cube.dtype
+
+    def test_file_numbers_returned(
+        self,
+        tmp_path,
+        sample_cube,
+        sample_wavelengths,
+    ):
+        """Return correct file numbers as an integer array."""
+        for num in [5010, 5011, 5012]:
+            filepath = tmp_path / f"cube_lm_251108_{num:06d}.fits"
+            write_test_cube(filepath, sample_cube, sample_wavelengths)
+
+        _, _, file_numbers, _ = read_cubes(tmp_path)
+
+        assert isinstance(file_numbers, np.ndarray)
+        assert file_numbers.dtype == int
+        np.testing.assert_array_equal(file_numbers, [5010, 5011, 5012])
+
+    def test_file_numbers_match_range(
+        self,
+        tmp_path,
+        sample_cube,
+        sample_wavelengths,
+    ):
+        """Return only file numbers within the requested range."""
+        for num in [5001, 5002, 5003, 5004, 5005]:
+            filepath = tmp_path / f"cube_lm_251108_{num:06d}.fits"
+            write_test_cube(filepath, sample_cube, sample_wavelengths)
+
+        _, _, file_numbers, _ = read_cubes(
+            tmp_path,
+            file_range=(5002, 5004),
+        )
+        np.testing.assert_array_equal(file_numbers, [5002, 5003, 5004])
+
+    def test_file_numbers_length_matches_cubes(
+        self,
+        tmp_path,
+        sample_cube,
+        sample_wavelengths,
+    ):
+        """Verify file_numbers array length matches the number of cubes."""
+        for num in [5001, 5002, 5003]:
+            filepath = tmp_path / f"cube_lm_251108_{num:06d}.fits"
+            write_test_cube(filepath, sample_cube, sample_wavelengths)
+
+        cubes, _, file_numbers, _ = read_cubes(tmp_path)
+
+        assert len(file_numbers) == cubes.shape[0]

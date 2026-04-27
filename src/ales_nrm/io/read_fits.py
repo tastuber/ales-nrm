@@ -210,3 +210,97 @@ def find_cubes(
     )
 
     return selected
+
+
+def read_cubes(
+    directory: str | Path,
+    file_range: tuple[int, int] | None = None,
+    prefix: str = "cube_lm_",
+) -> tuple[np.ndarray, np.ndarray, list[fits.Header], np.ndarray]:
+    """Read multiple ALES cubes from a directory into a 4D array.
+
+    All cubes are expected to share the same wavelength grid and spatial
+    dimensions. The wavelength array and spatial shape are taken from the
+    first file and verified against all subsequent files.
+
+    Args:
+        directory: Path to the directory containing FITS files.
+        file_range: Optional tuple ``(start, end)`` of file numbers
+            (inclusive).
+        prefix: Filename prefix to filter on. Default is
+            ``'cube_lm_'``.
+
+    Returns:
+        A tuple of ``(cubes, wavelengths, headers, file_numbers)`` where:
+            - ``cubes`` is a 4D numpy array with shape
+              ``(n_files, n_wavelengths, ny, nx)``.
+            - ``wavelengths`` is a 1D numpy array of wavelengths in
+              microns (from the first file).
+            - ``headers`` is a list of FITS headers.
+            - ``file_numbers`` is a 1D integer numpy array of the
+              running file number extracted from each filename, in the
+              same order as the first axis of ``cubes``.
+
+    Raises:
+        FileNotFoundError: If the directory does not exist or no files
+            are found.
+        ValueError: If wavelength grids or spatial dimensions are
+            inconsistent across files.
+    """
+    paths = find_cubes(directory, file_range=file_range, prefix=prefix)
+
+    if not paths:
+        range_str = f" in range {file_range}" if file_range else ""
+        raise FileNotFoundError(
+            f"No FITS cubes found in {directory}{range_str}."
+        )
+
+    headers = []
+    reference_wavelengths = None
+    reference_shape = None
+
+    # First pass: read first file to determine array dimensions.
+    first_cube, reference_wavelengths, first_header = read_cube(paths[0])
+    reference_shape = first_cube.shape
+    headers.append(first_header)
+
+    # Pre-allocate the 4D array.
+    n_files = len(paths)
+    cubes = np.empty((n_files, *reference_shape), dtype=first_cube.dtype)
+    cubes[0] = first_cube
+
+    # Collect file numbers.
+    file_numbers = np.empty(n_files, dtype=int)
+    file_numbers[0] = parse_file_number(paths[0])
+
+    # Read remaining files.
+    for i, path in enumerate(paths[1:], start=1):
+        cube, wavelengths, header = read_cube(path)
+
+        if cube.shape != reference_shape:
+            raise ValueError(
+                f"Cube shape {cube.shape} in {path.name} does not match "
+                f"the reference shape {reference_shape} from "
+                f"{paths[0].name}."
+            )
+
+        if not np.allclose(wavelengths, reference_wavelengths, atol=1e-8):
+            raise ValueError(
+                f"Wavelength grid in {path.name} does not match the "
+                f"reference grid from {paths[0].name}."
+            )
+
+        cubes[i] = cube
+        headers.append(header)
+        file_numbers[i] = parse_file_number(path)
+
+    logger.info(
+        "Read %d cubes from %s: shape=%s, files %d–%d.",
+        n_files,
+        directory,
+        cubes.shape,
+        file_numbers[0],
+        file_numbers[-1],
+    )
+
+    return cubes, reference_wavelengths, file_numbers, headers
