@@ -34,7 +34,7 @@ class TestParseFileNumber:
         assert parse_file_number("cube_lm_251108_000042.fits") == 42
 
     def test_invalid_filename(self):
-        """Raise ValueError for a filename that does not match the pattern."""
+        """Raise ValueError for a filename not matching the pattern."""
         with pytest.raises(ValueError, match="does not match"):
             parse_file_number("not_a_valid_file.txt")
 
@@ -47,7 +47,7 @@ class TestReadWavelengths:
     """Tests for read_wavelengths."""
 
     def test_correct_wavelengths(self, sample_wavelengths):
-        """Recover the correct wavelength array from SLICEnnn keywords."""
+        """Recover the wavelength array from SLICEnnn keywords."""
         from astropy.io import fits as fits_mod
 
         header = fits_mod.Header()
@@ -113,7 +113,7 @@ class TestReadCube:
         sample_cube,
         sample_wavelengths,
     ):
-        """Preserve observatory-specific header keywords after reading."""
+        """Preserve header keywords after reading."""
         filepath = tmp_path / "cube_lm_251108_005001.fits"
         write_test_cube(
             filepath,
@@ -219,7 +219,7 @@ class TestReadCubes:
         sample_cube,
         sample_wavelengths,
     ):
-        """Raise ValueError when wavelength grids differ between files."""
+        """Raise ValueError when wavelengths differ between files."""
         filepath1 = tmp_path / "cube_lm_251108_005001.fits"
         write_test_cube(filepath1, sample_cube, sample_wavelengths)
 
@@ -236,7 +236,7 @@ class TestReadCubes:
         rng,
         sample_wavelengths,
     ):
-        """Raise ValueError when spatial dimensions differ between files."""
+        """Raise ValueError when dimensions differ between files."""
         cube1 = rng.normal(size=(98, 63, 67))
         filepath1 = tmp_path / "cube_lm_251108_005001.fits"
         write_test_cube(filepath1, cube1, sample_wavelengths)
@@ -268,7 +268,7 @@ class TestReadCubes:
         sample_cube,
         sample_wavelengths,
     ):
-        """Test dtype output/input match after native byte-order conversion."""
+        """Test I/O dtype match after native byte-order conversion."""
         filepath = tmp_path / "cube_lm_251108_005001.fits"
         write_test_cube(filepath, sample_cube, sample_wavelengths)
 
@@ -316,7 +316,7 @@ class TestReadCubes:
         sample_cube,
         sample_wavelengths,
     ):
-        """Verify file_numbers array length matches the number of cubes."""
+        """Verify file_numbers array length matches cube number."""
         for num in [5001, 5002, 5003]:
             filepath = tmp_path / f"cube_lm_251108_{num:06d}.fits"
             write_test_cube(filepath, sample_cube, sample_wavelengths)
