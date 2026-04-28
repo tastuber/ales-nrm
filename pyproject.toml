@@ -98,6 +98,9 @@ select = [
     "NPY",
 ]
 
+[tool.ruff.lint.pycodestyle]
+max-doc-length = 72
+
 [tool.ruff.lint.pydocstyle]
 convention = "google"
 
