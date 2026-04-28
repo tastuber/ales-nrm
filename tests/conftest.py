@@ -13,7 +13,7 @@ def rng():
 
 @pytest.fixture()
 def sample_wavelengths():
-    """Provide a realistic ALES wavelength array (98 channels, 2.77–4.29µm)."""
+    """Provide a realistic ALES wavelength array."""
     return np.linspace(2.768, 4.290, 98)
 
 

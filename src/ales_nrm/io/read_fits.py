@@ -4,16 +4,17 @@ The ALES integral field spectrograph produces 3D data cubes where the
 third axis corresponds to wavelength. Each FITS file contains a single
 sky-subtracted spectral cube with dimensions (n_wavelengths, ny, nx).
 
-Wavelength information is stored in the FITS header as SLICEnnn keywords,
-where nnn is a zero-padded three-digit index corresponding to the slice
-along NAXIS3.
+Wavelength information is stored in the FITS header as SLICEnnn
+keywords, where nnn is a zero-padded three-digit index corresponding to
+the slice along NAXIS3.
 
 Typical filenames follow the pattern::
 
     cube_lm_YYMMDD_NNNNNN.fits
     cube_lm_YYMMDD_NNNNNN.fits.gz
 
-where YYMMDD is the UT date and NNNNNN is a six-digit running file number.
+where YYMMDD is the UT date and NNNNNN is a six-digit running file
+number.
 """
 
 import logging
@@ -157,7 +158,7 @@ def find_cubes(
     file_range: tuple[int, int] | None = None,
     prefix: str = "cube_lm_",
 ) -> list[Path]:
-    """Find cube FITS files in a directory, optionally by file number range.
+    """Find cube FITS files, optionally by file number range.
 
     Searches for files matching the naming pattern
     ``<prefix>*_NNNNNN.fits[.gz]``. If ``file_range`` is provided, only
@@ -220,8 +221,8 @@ def read_cubes(
     """Read multiple ALES cubes from a directory into a 4D array.
 
     All cubes are expected to share the same wavelength grid and spatial
-    dimensions. The wavelength array and spatial shape are taken from the
-    first file and verified against all subsequent files.
+    dimensions. The wavelength array and spatial shape are taken from
+    the first file and verified against all subsequent files.
 
     Args:
         directory: Path to the directory containing FITS files.
@@ -231,7 +232,7 @@ def read_cubes(
             ``'cube_lm_'``.
 
     Returns:
-        A tuple of ``(cubes, wavelengths, headers, file_numbers)`` where:
+        A tuple of ``(cubes, wavelengths, headers, file_numbers)`` with:
             - ``cubes`` is a 4D numpy array with shape
               ``(n_files, n_wavelengths, ny, nx)``.
             - ``wavelengths`` is a 1D numpy array of wavelengths in

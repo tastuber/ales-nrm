@@ -1,4 +1,4 @@
-"""ALES NRM: Data reduction pipeline for LBTI/LMIRCam/ALES NRM observations.
+"""Data reduction pipeline for LBTI/LMIRCam/ALES NRM observations.
 
 This package provides tools for performing analysis of non-redundant
 aperture masking (NRM) infrared imaging data obtained with the Arizona
