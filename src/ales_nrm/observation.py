@@ -1,8 +1,10 @@
-"""Observing block management.
+"""Observing block and observation sequence management.
 
 This module provides data structures for organizing ALES NRM
-observations into observing blocks. An ObservingBlock represents a
-contiguous set of files from a single target and configuration.
+observations into observing blocks and calibration sequences. An
+ObservingBlock represents a contiguous set of files from a single target
+and configuration. An ObservationSequence groups multiple blocks into a
+calibration sequence such as CAL-SCI-CAL.
 """
 
 import enum
@@ -195,3 +197,144 @@ class ObservingBlock:
             self.n_files,
             self.cubes.shape,
         )
+
+
+@dataclass
+class ObservingSequence:
+    """An ordered sequence of blocks forming a calibration sequence.
+
+    An ObservingSequence groups science and calibrator blocks into a
+    sequence such as CAL1-SCI-CAL2 or SCI-CAL-SCI. The ordering
+    reflects the time sequence of the observations, which is important
+    for calibration interpolation.
+
+    Attributes:
+        blocks: Ordered list of ObservingBlock objects.
+        name: Optional descriptive name for this sequence
+            (e.g., ``'eps Hya Nov 8 sequence 1'``).
+    """
+
+    blocks: list[ObservingBlock] = field(default_factory=list)
+    name: str = ""
+
+    @property
+    def science_blocks(self) -> list[ObservingBlock]:
+        """Return all science blocks in sequence order."""
+        return [b for b in self.blocks if b.block_type == BlockType.SCI]
+
+    @property
+    def calibrator_blocks(self) -> list[ObservingBlock]:
+        """Return all calibrator blocks in sequence order."""
+        return [b for b in self.blocks if b.block_type == BlockType.CAL]
+
+    @property
+    def targets(self) -> list[str]:
+        """Return unique target names in order of first appearance."""
+        seen = set()
+        result = []
+        for block in self.blocks:
+            if block.target not in seen:
+                seen.add(block.target)
+                result.append(block.target)
+        return result
+
+    @property
+    def is_loaded(self) -> bool:
+        """Whether all blocks have been loaded."""
+        if not self.blocks:
+            return False
+        return all(b.is_loaded for b in self.blocks)
+
+    def add_block(self, block: ObservingBlock) -> None:
+        """Append a block to the observing sequence.
+
+        Args:
+            block: ObservingBlock to add.
+        """
+        self.blocks.append(block)
+        logger.info(
+            "Added %s block '%s' to sequence '%s'.",
+            block.block_type.value,
+            block.target,
+            self.name,
+        )
+
+    def load_all(self) -> None:
+        """Load data for all blocks that are not yet loaded."""
+        logger.info(
+            "Loading all %d blocks in sequence '%s'.",
+            len(self.blocks),
+            self.name,
+        )
+        for block in self.blocks:
+            if not block.is_loaded:
+                block.load()
+
+    def get_blocks_by_target(
+        self,
+        target: str,
+    ) -> list[ObservingBlock]:
+        """Return all blocks matching a given target name.
+
+        Args:
+            target: Target name to filter by.
+
+        Returns:
+            List of matching blocks in sequence order.
+        """
+        return [b for b in self.blocks if b.target == target]
+
+    def get_blocks_by_type(
+        self,
+        block_type: BlockType,
+    ) -> list[ObservingBlock]:
+        """Return all blocks matching a given type.
+
+        Args:
+            block_type: BlockType to filter by.
+
+        Returns:
+            List of matching blocks in sequence order.
+        """
+        if not isinstance(block_type, BlockType):
+            block_type = BlockType(block_type)
+        return [b for b in self.blocks if b.block_type == block_type]
+
+    def summary(self) -> str:
+        """Return a human-readable summary of the sequence.
+
+        Returns:
+            Multi-line string describing each block.
+        """
+        lines = [f"Sequence: {self.name or '(unnamed)'}"]
+        lines.append(f"  Blocks: {len(self.blocks)}")
+        lines.append(f"  Science blocks: {len(self.science_blocks)}")
+        lines.append(f"  Calibrator blocks: {len(self.calibrator_blocks)}")
+        lines.append(f"  Targets: {', '.join(self.targets)}")
+        lines.append("")
+
+        for i, block in enumerate(self.blocks):
+            loaded = "loaded" if block.is_loaded else "not loaded"
+            if block.file_range is not None:
+                files = f"files {block.file_range[0]}–{block.file_range[1]}"
+            else:
+                files = "all files"
+            lines.append(
+                f"  [{i}] {block.block_type.value} "
+                f"'{block.target}' "
+                f"{files} ({loaded})"
+            )
+
+        return "\n".join(lines)
+
+    def __len__(self) -> int:
+        """Return the number of blocks."""
+        return len(self.blocks)
+
+    def __getitem__(self, index: int) -> ObservingBlock:
+        """Access a block by index."""
+        return self.blocks[index]
+
+    def __iter__(self):
+        """Iterate over blocks in sequence order."""
+        return iter(self.blocks)
