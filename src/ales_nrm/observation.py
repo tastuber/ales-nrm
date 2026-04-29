@@ -314,15 +314,25 @@ class ObservingSequence:
         lines.append("")
 
         for i, block in enumerate(self.blocks):
-            loaded = "loaded" if block.is_loaded else "not loaded"
             if block.file_range is not None:
                 files = f"files {block.file_range[0]}–{block.file_range[1]}"
+                expected = block.file_range[1] - block.file_range[0] + 1
+                if block.is_loaded:
+                    load_info = (
+                        f"{block.n_files}/{expected} files loaded/expected"
+                    )
+                else:
+                    load_info = f"{expected} files expected, not loaded"
             else:
                 files = "all files"
+                if block.is_loaded:
+                    load_info = f"{block.n_files} files loaded"
+                else:
+                    load_info = "file count unknown, not loaded"
+
             lines.append(
-                f"  [{i}] {block.block_type.value} "
-                f"'{block.target}' "
-                f"{files} ({loaded})"
+                f"  [{i}] {block.block_type.value} '{block.target}' "
+                f"{files} ({load_info})"
             )
 
         return "\n".join(lines)
