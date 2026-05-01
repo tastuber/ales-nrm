@@ -2,6 +2,7 @@
 
 import numpy as np
 import pytest
+from astropy.io import fits
 
 from ales_nrm.io.read_fits import (
     find_cubes,
@@ -126,6 +127,25 @@ class TestReadCube:
         assert header["LBT_PARA"] == "15.5"
         assert header["TIME-OBS"] == "10:30:00.000"
 
+    def test_empty_primary_hdu(self, tmp_path):
+        """Raise ValueError when primary HDU contains no data."""
+        filepath = tmp_path / "cube_lm_251108_005001.fits"
+        hdu = fits.PrimaryHDU()
+        hdu.writeto(filepath)
+
+        with pytest.raises(ValueError, match="No data in primary HDU"):
+            read_cube(filepath)
+
+    def test_non_3d_data(self, tmp_path, rng):
+        """Raise ValueError when data is not 3-dimensional."""
+        filepath = tmp_path / "cube_lm_251108_005001.fits"
+        data_2d = rng.normal(size=(63, 67))
+        hdu = fits.PrimaryHDU(data=data_2d)
+        hdu.writeto(filepath)
+
+        with pytest.raises(ValueError, match="Expected a 3D data cube"):
+            read_cube(filepath)
+
 
 class TestFindCubes:
     """Tests for find_cubes."""
@@ -177,6 +197,24 @@ class TestFindCubes:
         """Return an empty list for a directory with no FITS files."""
         paths = find_cubes(tmp_path)
         assert paths == []
+
+    def test_skips_non_matching_filenames(
+        self,
+        tmp_path,
+        sample_cube,
+        sample_wavelengths,
+    ):
+        """Skip files that match the glob but not the number pattern."""
+        # Valid file
+        filepath = tmp_path / "cube_lm_251108_005001.fits"
+        write_test_cube(filepath, sample_cube, sample_wavelengths)
+
+        # File that matches glob but has no 6-digit number
+        bad_filepath = tmp_path / "cube_lm_badname.fits"
+        write_test_cube(bad_filepath, sample_cube, sample_wavelengths)
+
+        paths = find_cubes(tmp_path, file_range=(5001, 5001))
+        assert len(paths) == 1
 
 
 class TestReadCubes:
