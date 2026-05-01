@@ -51,13 +51,27 @@ class ObservingBlock:
             ``'cube_lm_'``.
         cubes: 4D numpy array of shape
             ``(n_files, n_wavelengths, ny, nx)`` after loading. ``None``
-            before ``load()`` is called.
+            before ``load()`` is called. After stacking, contains the
+            stacked cubes.
         wavelengths: 1D numpy array of wavelengths in microns after
             loading. ``None`` before ``load()`` is called.
         file_numbers: 1D integer numpy array of file numbers after
-            loading. ``None`` before ``load()`` is called.
+            loading. ``None`` before ``load()`` is called. After
+            stacking, contains the first file number of each stacking
+            group as a representative identifier.
         headers: List of FITS headers after loading. ``None`` before
-            ``load()`` is called.
+            ``load()`` is called. After stacking, contains the header of
+            the first file in each stacking group.
+        is_stacked: Whether the data has been stacked via
+            ``stack_frames()``. Default is ``False``.
+        stacking_groups: List of integer arrays after stacking, one per
+            stacked cube, containing all file numbers that were combined
+            into that cube. ``None`` before ``stack_frames()`` is
+            called. Provides full traceability of which frames
+            contributed to each stacked cube.
+        stacking_method: The combination method used for stacking
+            (``'median'`` or ``'mean'``). ``None`` before
+            ``stack_frames()`` is called.
     """
 
     block_type: BlockType
@@ -75,6 +89,15 @@ class ObservingBlock:
         repr=False,
     )
     headers: list[fits.Header] | None = field(
+        default=None,
+        repr=False,
+    )
+    is_stacked: bool = field(default=False, repr=True)
+    stacking_groups: list[np.ndarray] | None = field(
+        default=None,
+        repr=False,
+    )
+    stacking_method: str | None = field(
         default=None,
         repr=False,
     )
@@ -198,28 +221,276 @@ class ObservingBlock:
             self.cubes.shape,
         )
 
+    def _resolve_stacking_groups(
+        self,
+        group_size: int | None = None,
+        groups: list[list[int]] | None = None,
+        remainder: str = "discard",
+    ) -> list[np.ndarray]:
+        """Build stacking groups from group_size or explicit groups.
+
+        Args:
+            group_size: Number of consecutive frames per group.
+            groups: Explicit list of file number groups.
+            remainder: How to handle leftover frames when using
+                ``group_size``. ``'discard'`` (default) drops them,
+                ``'keep'`` includes them as a smaller group, ``'add'``
+                appends them to the last complete group.
+
+        Returns:
+            List of 1D integer arrays, each containing the file numbers
+            for one stacking group.
+
+        Raises:
+            ValueError: If arguments are invalid or file numbers in
+                ``groups`` are not found in the loaded data.
+        """
+        if (group_size is None) == (groups is None):
+            raise ValueError(
+                "Specify exactly one of 'group_size' or 'groups'."
+            )
+
+        if group_size is not None:
+            if group_size < 1:
+                raise ValueError(f"group_size must be >= 1, got {group_size}.")
+            if remainder not in ("discard", "keep", "add"):
+                raise ValueError(
+                    f"remainder must be 'discard', 'keep', or "
+                    f"'add', got '{remainder}'."
+                )
+
+            n = self.n_files
+            n_complete = n // group_size
+            leftover = n % group_size
+
+            resolved = []
+            for i in range(n_complete):
+                start = i * group_size
+                end = start + group_size
+                resolved.append(self.file_numbers[start:end].copy())
+
+            if leftover > 0:
+                leftover_fnums = self.file_numbers[n_complete * group_size :]
+                if remainder == "keep":
+                    resolved.append(leftover_fnums.copy())
+                    logger.info(
+                        "Keeping remainder: last group has "
+                        "%d frames (less than group_size=%d).",
+                        leftover,
+                        group_size,
+                    )
+                elif remainder == "add":
+                    if not resolved:
+                        resolved.append(leftover_fnums.copy())
+                        logger.info(
+                            "No complete groups; single group of %d frames.",
+                            leftover,
+                        )
+                    else:
+                        resolved[-1] = np.concatenate(
+                            [resolved[-1], leftover_fnums]
+                        )
+                        logger.info(
+                            "Added %d remainder frames to last "
+                            "group (now %d frames).",
+                            leftover,
+                            len(resolved[-1]),
+                        )
+                else:
+                    logger.info(
+                        "Discarding %d remainder frames: %s.",
+                        leftover,
+                        leftover_fnums.tolist(),
+                    )
+
+            return resolved
+
+        # Explicit groups: validate file numbers.
+        loaded_set = set(self.file_numbers.tolist())
+        resolved = []
+        for group in groups:
+            arr = np.array(group, dtype=int)
+            missing = set(arr.tolist()) - loaded_set
+            if missing:
+                raise ValueError(
+                    f"File numbers {sorted(missing)} in "
+                    f"stacking group are not loaded in "
+                    f"block '{self.target}'."
+                )
+            resolved.append(arr)
+        return resolved
+
+    def stack_frames(
+        self,
+        group_size: int | None = None,
+        groups: list[list[int]] | None = None,
+        method: str = "median",
+        remainder: str = "discard",
+        center: bool = False,
+    ) -> None:
+        """Stack frames within this block, replacing loaded data.
+
+        Combines multiple frames into fewer stacked cubes. The stacked
+        data replaces the original data in ``cubes``, ``file_numbers``,
+        and ``headers``. The attribute ``stacking_groups`` records which
+        file numbers were combined into each resulting cube.
+
+        Frames can be grouped either by specifying a fixed
+        ``group_size`` (stack every N consecutive frames) or by
+        providing explicit ``groups`` of file numbers.
+
+        Args:
+            group_size: Number of consecutive frames per stacking group.
+                Cannot be used together with ``groups``.
+            groups: List of lists, where each inner list contains file
+                numbers to stack together. Cannot be used together with
+                ``group_size``.
+            method: Combination method. ``'median'`` (default) or
+                ``'mean'``.
+            remainder: How to handle leftover frames when the total
+                number of frames is not evenly divisible by
+                ``group_size``. ``'discard'`` (default) drops leftover
+                frames. ``'keep'`` stacks them into a smaller final
+                group. ``'add'`` appends them to the last complete
+                group. Ignored when using explicit ``groups``.
+            center: If ``True``, center frames before stacking using
+                image registration. Not yet implemented.
+
+        Raises:
+            RuntimeError: If data has not been loaded, or if data has
+                already been stacked.
+            ValueError: If arguments are invalid, if ``method`` is not
+                recognized, or if file numbers in ``groups`` are not
+                found in the loaded data.
+            NotImplementedError: If ``center=True``.
+        """
+        if not self.is_loaded:
+            raise RuntimeError(
+                f"Block '{self.target}' "
+                f"({self.block_type.value}) has not been "
+                f"loaded. Call load() first."
+            )
+
+        if self.is_stacked:
+            raise RuntimeError(
+                f"Block '{self.target}' "
+                f"({self.block_type.value}) has already "
+                f"been stacked. Reload data to re-stack."
+            )
+
+        if center:
+            raise NotImplementedError(
+                "Frame centering before stacking is not yet implemented."
+            )
+
+        if method not in ("median", "mean"):
+            raise ValueError(
+                f"Unknown stacking method '{method}'. Use 'median' or 'mean'."
+            )
+
+        combine_func = np.median if method == "median" else np.mean
+
+        resolved_groups = self._resolve_stacking_groups(
+            group_size=group_size,
+            groups=groups,
+            remainder=remainder,
+        )
+
+        if not resolved_groups:
+            raise ValueError(
+                "No stacking groups could be formed. "
+                "Check group_size relative to the number "
+                "of loaded frames."
+            )
+
+        # Build index mapping from file number to cube index.
+        fnum_to_idx = {int(fn): i for i, fn in enumerate(self.file_numbers)}
+
+        n_groups = len(resolved_groups)
+        cube_shape = self.cubes.shape[1:]
+        stacked = np.empty(
+            (n_groups, *cube_shape),
+            dtype=self.cubes.dtype,
+        )
+        new_file_numbers = np.empty(n_groups, dtype=int)
+        new_headers = []
+        stacking_groups = []
+
+        for g, group_fnums in enumerate(resolved_groups):
+            indices = np.array([fnum_to_idx[int(fn)] for fn in group_fnums])
+            stacked[g] = combine_func(
+                self.cubes[indices],
+                axis=0,
+            )
+            new_file_numbers[g] = group_fnums[0]
+            new_headers.append(self.headers[indices[0]])
+            stacking_groups.append(group_fnums.copy())
+
+        n_original = self.cubes.shape[0]
+        self.cubes = stacked
+        self.file_numbers = new_file_numbers
+        self.headers = new_headers
+        self.is_stacked = True
+        self.stacking_groups = stacking_groups
+        self.stacking_method = method
+
+        logger.info(
+            "Stacked %s block '%s': %d frames -> "
+            "%d stacked cubes (method='%s', remainder='%s').",
+            self.block_type.value,
+            self.target,
+            n_original,
+            n_groups,
+            method,
+            remainder,
+        )
+
     def summary(self) -> str:
         """Return a one-line summary of this block's state.
 
         Returns:
-            String describing block type, target, file range,
-            and loading state.
+            String describing block type, target, and current
+            data state including loading and stacking info.
         """
-        if self.file_range is not None:
-            files = f"files {self.file_range[0]}–{self.file_range[1]}"
-            expected = self.file_range[1] - self.file_range[0] + 1
-            if self.is_loaded:
-                load_info = f"{self.n_files}/{expected} files loaded/expected"
-            else:
-                load_info = f"{expected} files expected, not loaded"
-        else:
-            files = "all files"
-            if self.is_loaded:
-                load_info = f"{self.n_files} files loaded"
-            else:
-                load_info = "file count unknown, not loaded"
+        parts = [f"{self.block_type.value} '{self.target}'"]
 
-        return f"{self.block_type.value} '{self.target}' {files} ({load_info})"
+        if not self.is_loaded:
+            if self.file_range is not None:
+                expected = self.file_range[1] - self.file_range[0] + 1
+                parts.append(
+                    f"files {self.file_range[0]}"
+                    f"–{self.file_range[1]}"
+                    f" ({expected} files expected,"
+                    f" not loaded)"
+                )
+            else:
+                parts.append("all files (file count unknown, not loaded)")
+            return " ".join(parts)
+
+        if not self.is_stacked:
+            if self.file_range is not None:
+                expected = self.file_range[1] - self.file_range[0] + 1
+                parts.append(
+                    f"{self.n_files}/{expected} files loaded/expected"
+                )
+            else:
+                parts.append(f"{self.n_files} files loaded")
+            return " ".join(parts)
+
+        # Stacked state.
+        group_sizes = [len(g) for g in self.stacking_groups]
+        if len(set(group_sizes)) == 1:
+            group_desc = (
+                f"{len(group_sizes)} cubes from groups of {group_sizes[0]}"
+            )
+        else:
+            group_desc = (
+                f"{len(group_sizes)} cubes from groups of {group_sizes}"
+            )
+        parts.append(
+            f"stacked ({group_desc}, method='{self.stacking_method}')"
+        )
+        return " ".join(parts)
 
 
 @dataclass
