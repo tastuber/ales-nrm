@@ -244,6 +244,60 @@ class TestObservingBlockValidation:
             block.load()
 
 
+class TestObservingBlockSummary:
+    """Tests for ObservingBlock.summary()."""
+
+    def test_summary_unloaded_with_file_range(self, sci_block):
+        """Summary shows expected count when not loaded."""
+        summary = sci_block.summary()
+        assert "SCI" in summary
+        assert "test target" in summary
+        assert "3 files expected" in summary
+        assert "not loaded" in summary
+
+    def test_summary_loaded_with_file_range(self, sci_block):
+        """Summary shows loaded/expected count after loading."""
+        sci_block.load()
+        summary = sci_block.summary()
+        assert "SCI" in summary
+        assert "test target" in summary
+        assert "3/3 files loaded/expected" in summary
+
+    def test_summary_unloaded_without_file_range(
+        self,
+        sample_directory,
+    ):
+        """Summary shows unknown count when no range set."""
+        block = ObservingBlock(
+            block_type=BlockType.SCI,
+            target="test target",
+            directory=sample_directory,
+        )
+        summary = block.summary()
+        assert "file count unknown" in summary
+        assert "not loaded" in summary
+
+    def test_summary_loaded_without_file_range(
+        self,
+        sample_directory,
+    ):
+        """Summary shows actual count when loaded without range."""
+        block = ObservingBlock(
+            block_type=BlockType.SCI,
+            target="test target",
+            directory=sample_directory,
+        )
+        block.load()
+        summary = block.summary()
+        assert "5 files loaded" in summary
+
+    def test_summary_cal_block(self, cal_block):
+        """Summary shows CAL type for calibrator blocks."""
+        summary = cal_block.summary()
+        assert "CAL" in summary
+        assert "test calibrator" in summary
+
+
 class TestObservingSequence:
     """Tests for the ObservingSequence container."""
 
@@ -411,6 +465,7 @@ class TestObservingSequence:
         assert "SCI" in summary
         assert "CAL" in summary
         assert "not loaded" in summary
+        assert "expected" in summary
 
     def test_summary_loaded(self, sci_block, cal_block):
         """Summary reflects loaded state after loading."""
@@ -419,8 +474,10 @@ class TestObservingSequence:
         )
         seq.load_all()
         summary = seq.summary()
-        assert "loaded" in summary
+        assert "loaded/expected" in summary
         assert "not loaded" not in summary
+        assert "3/3 files" in summary
+        assert "2/2 files" in summary
 
 
 class TestObservingSequenceIntegration:
