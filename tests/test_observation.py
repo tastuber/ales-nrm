@@ -297,6 +297,438 @@ class TestObservingBlockSummary:
         assert "CAL" in summary
         assert "test calibrator" in summary
 
+    def test_summary_stacked(self, sample_directory):
+        """Summary shows stacking state and group sizes."""
+        block = ObservingBlock(
+            block_type=BlockType.SCI,
+            target="test target",
+            directory=sample_directory,
+            file_range=(5001, 5005),
+        )
+        block.load()
+        block.stack_frames(group_size=5)
+        summary = block.summary()
+        assert "stacked" in summary
+        assert "1 cubes from groups of 5" in summary
+        assert "method='median'" in summary
+
+
+class TestStackFrames:
+    """Tests for ObservingBlock.stack_frames()."""
+
+    def test_stack_not_loaded(self, sci_block):
+        """Raise RuntimeError if stacking before loading."""
+        with pytest.raises(RuntimeError, match="not been loaded"):
+            sci_block.stack_frames(group_size=3)
+
+    def test_stack_already_stacked(self, sci_block):
+        """Raise RuntimeError if stacking already-stacked data."""
+        sci_block.load()
+        sci_block.stack_frames(group_size=3)
+        with pytest.raises(RuntimeError, match="already been stacked"):
+            sci_block.stack_frames(group_size=1)
+
+    def test_stack_no_args(self, sci_block):
+        """Raise ValueError if neither group_size nor groups."""
+        sci_block.load()
+        with pytest.raises(ValueError, match="Specify exactly one"):
+            sci_block.stack_frames()
+
+    def test_stack_both_args(self, sci_block):
+        """Raise ValueError if both group_size and groups."""
+        sci_block.load()
+        with pytest.raises(ValueError, match="Specify exactly one"):
+            sci_block.stack_frames(
+                group_size=2,
+                groups=[[5001, 5002]],
+            )
+
+    def test_stack_invalid_method(self, sci_block):
+        """Raise ValueError for invalid stacking method."""
+        sci_block.load()
+        with pytest.raises(ValueError, match="Unknown stacking method"):
+            sci_block.stack_frames(group_size=3, method="sum")
+
+    def test_stack_invalid_remainder(self, sci_block):
+        """Raise ValueError for invalid remainder option."""
+        sci_block.load()
+        with pytest.raises(ValueError, match="remainder must be"):
+            sci_block.stack_frames(group_size=2, remainder="invalid")
+
+    def test_stack_center_not_implemented(self, sci_block):
+        """Raise NotImplementedError for center=True."""
+        sci_block.load()
+        with pytest.raises(NotImplementedError):
+            sci_block.stack_frames(group_size=3, center=True)
+
+    def test_stack_invalid_group_size(self, sci_block):
+        """Raise ValueError for group_size < 1."""
+        sci_block.load()
+        with pytest.raises(ValueError, match="group_size must be"):
+            sci_block.stack_frames(group_size=0)
+
+    def test_stack_group_size_all(self, sci_block):
+        """Stack all frames into a single cube."""
+        sci_block.load()
+        original_shape = sci_block.cubes.shape[1:]
+        sci_block.stack_frames(group_size=3)
+
+        assert sci_block.is_stacked
+        assert sci_block.n_files == 1
+        assert sci_block.cubes.shape == (1, *original_shape)
+        assert sci_block.file_numbers[0] == 5001
+        assert len(sci_block.headers) == 1
+        assert len(sci_block.stacking_groups) == 1
+        np.testing.assert_array_equal(
+            sci_block.stacking_groups[0],
+            [5001, 5002, 5003],
+        )
+
+    def test_stack_group_size_one(self, sample_directory):
+        """Stack with group_size=1 preserves all frames."""
+        block = ObservingBlock(
+            "SCI",
+            "test target",
+            sample_directory,
+            file_range=(5001, 5005),
+        )
+        block.load()
+        original_cubes = block.cubes.copy()
+        block.stack_frames(group_size=1)
+
+        assert block.is_stacked
+        assert block.n_files == 5
+        np.testing.assert_allclose(
+            block.cubes,
+            original_cubes,
+        )
+
+    def test_stack_group_size_even_split(
+        self,
+        sample_directory,
+    ):
+        """Stack 4 frames into 2 groups of 2."""
+        block = ObservingBlock(
+            "SCI",
+            "test target",
+            sample_directory,
+            file_range=(5001, 5004),
+        )
+        block.load()
+        block.stack_frames(group_size=2)
+
+        assert block.n_files == 2
+        np.testing.assert_array_equal(
+            block.file_numbers,
+            [5001, 5003],
+        )
+        assert len(block.stacking_groups) == 2
+        np.testing.assert_array_equal(
+            block.stacking_groups[0],
+            [5001, 5002],
+        )
+        np.testing.assert_array_equal(
+            block.stacking_groups[1],
+            [5003, 5004],
+        )
+
+    def test_stack_remainder_discard(
+        self,
+        sample_directory,
+    ):
+        """Discard remainder frames by default."""
+        block = ObservingBlock(
+            "SCI",
+            "test target",
+            sample_directory,
+            file_range=(5001, 5005),
+        )
+        block.load()
+        block.stack_frames(group_size=2)
+
+        assert block.n_files == 2
+        np.testing.assert_array_equal(
+            block.file_numbers,
+            [5001, 5003],
+        )
+        assert len(block.stacking_groups) == 2
+        np.testing.assert_array_equal(
+            block.stacking_groups[0],
+            [5001, 5002],
+        )
+        np.testing.assert_array_equal(
+            block.stacking_groups[1],
+            [5003, 5004],
+        )
+
+    def test_stack_remainder_keep(self, sample_directory):
+        """Keep remainder frames as a smaller final group."""
+        block = ObservingBlock(
+            "SCI",
+            "test target",
+            sample_directory,
+            file_range=(5001, 5005),
+        )
+        block.load()
+        block.stack_frames(
+            group_size=2,
+            remainder="keep",
+        )
+
+        assert block.n_files == 3
+        np.testing.assert_array_equal(
+            block.file_numbers,
+            [5001, 5003, 5005],
+        )
+        assert len(block.stacking_groups) == 3
+        np.testing.assert_array_equal(
+            block.stacking_groups[0],
+            [5001, 5002],
+        )
+        np.testing.assert_array_equal(
+            block.stacking_groups[1],
+            [5003, 5004],
+        )
+        np.testing.assert_array_equal(
+            block.stacking_groups[2],
+            [5005],
+        )
+
+    def test_stack_explicit_groups(self, sample_directory):
+        """Stack using explicit file number groups."""
+        block = ObservingBlock(
+            "SCI",
+            "test target",
+            sample_directory,
+            file_range=(5001, 5005),
+        )
+        block.load()
+        block.stack_frames(
+            groups=[[5001, 5002], [5003, 5004, 5005]],
+        )
+
+        assert block.n_files == 2
+        np.testing.assert_array_equal(
+            block.file_numbers,
+            [5001, 5003],
+        )
+        assert len(block.stacking_groups) == 2
+        np.testing.assert_array_equal(
+            block.stacking_groups[0],
+            [5001, 5002],
+        )
+        np.testing.assert_array_equal(
+            block.stacking_groups[1],
+            [5003, 5004, 5005],
+        )
+
+    def test_stack_explicit_groups_invalid_file(
+        self,
+        sci_block,
+    ):
+        """Raise ValueError for file numbers not in data."""
+        sci_block.load()
+        with pytest.raises(ValueError, match="not loaded"):
+            sci_block.stack_frames(
+                groups=[[5001, 9999]],
+            )
+
+    def test_stack_median_values(self, sample_directory):
+        """Verify median stacking produces correct values."""
+        block = ObservingBlock(
+            "SCI",
+            "test target",
+            sample_directory,
+            file_range=(5001, 5003),
+        )
+        block.load()
+        expected = np.median(block.cubes, axis=0)
+        block.stack_frames(group_size=3, method="median")
+
+        np.testing.assert_allclose(
+            block.cubes[0],
+            expected,
+        )
+
+    def test_stack_mean_values(self, sample_directory):
+        """Verify mean stacking produces correct values."""
+        block = ObservingBlock(
+            "SCI",
+            "test target",
+            sample_directory,
+            file_range=(5001, 5003),
+        )
+        block.load()
+        expected = np.mean(block.cubes, axis=0)
+        block.stack_frames(group_size=3, method="mean")
+
+        np.testing.assert_allclose(
+            block.cubes[0],
+            expected,
+        )
+
+    def test_stack_preserves_wavelengths(
+        self,
+        sci_block,
+        sample_wavelengths,
+    ):
+        """Stacking does not modify the wavelength array."""
+        sci_block.load()
+        sci_block.stack_frames(group_size=3)
+        np.testing.assert_allclose(
+            sci_block.wavelengths,
+            sample_wavelengths,
+        )
+
+    def test_stack_preserves_dtype(self, sci_block):
+        """Stacked cubes preserve the original dtype."""
+        sci_block.load()
+        original_dtype = sci_block.cubes.dtype
+        sci_block.stack_frames(group_size=3)
+        assert sci_block.cubes.dtype == original_dtype
+
+    def test_stack_empty_after_discard(
+        self,
+        sample_directory,
+    ):
+        """Raise ValueError when all frames are discarded."""
+        block = ObservingBlock(
+            "SCI",
+            "test target",
+            sample_directory,
+            file_range=(5001, 5002),
+        )
+        block.load()
+        with pytest.raises(ValueError, match="No stacking groups"):
+            block.stack_frames(
+                group_size=5,
+                remainder="discard",
+            )
+
+    def test_stacking_groups_traceability(
+        self,
+        sample_directory,
+    ):
+        """Verify stacking_groups allows full traceability."""
+        block = ObservingBlock(
+            "SCI",
+            "test target",
+            sample_directory,
+            file_range=(5001, 5005),
+        )
+        block.load()
+        block.stack_frames(
+            group_size=2,
+            remainder="keep",
+        )
+
+        # Each stacked cube can be traced back.
+        all_stacked_files = np.concatenate(block.stacking_groups)
+        np.testing.assert_array_equal(
+            np.sort(all_stacked_files),
+            [5001, 5002, 5003, 5004, 5005],
+        )
+
+    def test_summary_shows_stacking_info(
+        self,
+        sample_directory,
+    ):
+        """Summary shows stacking details."""
+        block = ObservingBlock(
+            "SCI",
+            "test target",
+            sample_directory,
+            file_range=(5001, 5005),
+        )
+        block.load()
+        block.stack_frames(
+            group_size=2,
+            remainder="keep",
+        )
+        summary = block.summary()
+        assert "stacked" in summary
+        assert "[2, 2, 1]" in summary
+        assert "method='median'" in summary
+
+    def test_stack_remainder_add(self, sample_directory):
+        """Add remainder frames to the last complete group."""
+        block = ObservingBlock(
+            "SCI",
+            "test target",
+            sample_directory,
+            file_range=(5001, 5005),
+        )
+        block.load()
+        block.stack_frames(
+            group_size=2,
+            remainder="add",
+        )
+
+        assert block.n_files == 2
+        np.testing.assert_array_equal(
+            block.file_numbers,
+            [5001, 5003],
+        )
+        assert len(block.stacking_groups) == 2
+        np.testing.assert_array_equal(
+            block.stacking_groups[0],
+            [5001, 5002],
+        )
+        np.testing.assert_array_equal(
+            block.stacking_groups[1],
+            [5003, 5004, 5005],
+        )
+
+    def test_stack_remainder_add_no_complete_groups(
+        self,
+        sample_directory,
+    ):
+        """Handle add when no complete groups exist."""
+        block = ObservingBlock(
+            "SCI",
+            "test target",
+            sample_directory,
+            file_range=(5001, 5002),
+        )
+        block.load()
+        block.stack_frames(
+            group_size=5,
+            remainder="add",
+        )
+
+        assert block.n_files == 1
+        np.testing.assert_array_equal(
+            block.stacking_groups[0],
+            [5001, 5002],
+        )
+
+    def test_stack_remainder_add_even_split(
+        self,
+        sample_directory,
+    ):
+        """Add with even split behaves like normal stacking."""
+        block = ObservingBlock(
+            "SCI",
+            "test target",
+            sample_directory,
+            file_range=(5001, 5004),
+        )
+        block.load()
+        block.stack_frames(
+            group_size=2,
+            remainder="add",
+        )
+
+        assert block.n_files == 2
+        np.testing.assert_array_equal(
+            block.stacking_groups[0],
+            [5001, 5002],
+        )
+        np.testing.assert_array_equal(
+            block.stacking_groups[1],
+            [5003, 5004],
+        )
+
 
 class TestObservingSequence:
     """Tests for the ObservingSequence container."""
