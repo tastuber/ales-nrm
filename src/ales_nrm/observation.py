@@ -198,6 +198,29 @@ class ObservingBlock:
             self.cubes.shape,
         )
 
+    def summary(self) -> str:
+        """Return a one-line summary of this block's state.
+
+        Returns:
+            String describing block type, target, file range,
+            and loading state.
+        """
+        if self.file_range is not None:
+            files = f"files {self.file_range[0]}–{self.file_range[1]}"
+            expected = self.file_range[1] - self.file_range[0] + 1
+            if self.is_loaded:
+                load_info = f"{self.n_files}/{expected} files loaded/expected"
+            else:
+                load_info = f"{expected} files expected, not loaded"
+        else:
+            files = "all files"
+            if self.is_loaded:
+                load_info = f"{self.n_files} files loaded"
+            else:
+                load_info = "file count unknown, not loaded"
+
+        return f"{self.block_type.value} '{self.target}' {files} ({load_info})"
+
 
 @dataclass
 class ObservingSequence:
@@ -314,26 +337,7 @@ class ObservingSequence:
         lines.append("")
 
         for i, block in enumerate(self.blocks):
-            if block.file_range is not None:
-                files = f"files {block.file_range[0]}–{block.file_range[1]}"
-                expected = block.file_range[1] - block.file_range[0] + 1
-                if block.is_loaded:
-                    load_info = (
-                        f"{block.n_files}/{expected} files loaded/expected"
-                    )
-                else:
-                    load_info = f"{expected} files expected, not loaded"
-            else:
-                files = "all files"
-                if block.is_loaded:
-                    load_info = f"{block.n_files} files loaded"
-                else:
-                    load_info = "file count unknown, not loaded"
-
-            lines.append(
-                f"  [{i}] {block.block_type.value} '{block.target}' "
-                f"{files} ({load_info})"
-            )
+            lines.append(f"  [{i}] {block.summary()}")
 
         return "\n".join(lines)
 
