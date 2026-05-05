@@ -327,6 +327,7 @@ class ObservingBlock:
         method: str = "median",
         remainder: str = "discard",
         center: bool = False,
+        center_kwargs: dict | None = None,
     ) -> None:
         """Stack frames within this block, replacing loaded data.
 
@@ -353,8 +354,15 @@ class ObservingBlock:
                 frames. ``'keep'`` stacks them into a smaller final
                 group. ``'add'`` appends them to the last complete
                 group. Ignored when using explicit ``groups``.
-            center: If ``True``, center frames before stacking using
-                image registration. Not yet implemented.
+            center: If ``True``, center frames before stacking. Each
+                wavelength slice is centered independently to account
+                for ALES chromatic PSF position shifts.
+            center_kwargs: Optional dictionary of keyword arguments
+                passed to the centering function. Supported keys include
+                ``n_wave_sum`` (number of adjacent wavelength slices to
+                sum before centroiding, default 1) and ``cutout_size``
+                (side length of the Gaussian fitting cutout, default 5).
+                Ignored if ``center=False``.
 
         Raises:
             RuntimeError: If data has not been loaded, or if data has
@@ -379,8 +387,24 @@ class ObservingBlock:
             )
 
         if center:
-            raise NotImplementedError(
-                "Frame centering before stacking is not yet implemented."
+            from ales_nrm.centering import center_cubes
+
+            if center_kwargs is None:
+                center_kwargs = {}
+
+            logger.info(
+                "Centering %d frames before stacking (center_kwargs=%s).",
+                self.cubes.shape[0],
+                center_kwargs,
+            )
+            self.cubes, centering_shifts = center_cubes(
+                self.cubes,
+                **center_kwargs,
+            )
+            logger.info(
+                "Centering complete. Mean abs shift: dy=%.3f, dx=%.3f.",
+                np.mean(np.abs(centering_shifts[:, :, 0])),
+                np.mean(np.abs(centering_shifts[:, :, 1])),
             )
 
         if method not in ("median", "mean"):

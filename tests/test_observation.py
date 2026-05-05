@@ -355,11 +355,18 @@ class TestStackFrames:
         with pytest.raises(ValueError, match="remainder must be"):
             sci_block.stack_frames(group_size=2, remainder="invalid")
 
-    def test_stack_center_not_implemented(self, sci_block):
-        """Raise NotImplementedError for center=True."""
+    @pytest.mark.filterwarnings(
+        "ignore::astropy.utils.exceptions.AstropyUserWarning"
+    )
+    def test_stack_with_centering(self, sci_block):
+        """Stack with centering enabled completes."""
         sci_block.load()
-        with pytest.raises(NotImplementedError):
-            sci_block.stack_frames(group_size=3, center=True)
+        sci_block.stack_frames(
+            group_size=3,
+            center=True,
+        )
+        assert sci_block.is_stacked
+        assert sci_block.n_files == 1
 
     def test_stack_invalid_group_size(self, sci_block):
         """Raise ValueError for group_size < 1."""
