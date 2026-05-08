@@ -68,6 +68,9 @@ version_file = "src/ales_nrm/_version.py"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+"ales_nrm.masks" = ["*.txt"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = [

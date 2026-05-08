@@ -1,0 +1,9 @@
+# LBTI NRM 6-hole mask coordinates (DX mirror)
+# Columns: Hole ID,  x,  y,  radius
+# x, y, radius in meters in the pupil plane
+H1   5.62600   3.15868  0.392
+H2   4.92275   1.94061  0.392
+H3   4.21950  -1.71358  0.392
+H4   9.14225  -2.93164  0.392
+H5  10.54870  -0.49552  0.392
+H6   7.03250   3.15868  0.392
