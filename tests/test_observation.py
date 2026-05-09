@@ -737,6 +737,150 @@ class TestStackFrames:
         )
 
 
+class TestComplexVisibilities:
+    """Tests for complex visibility computation."""
+
+    def test_compute_complex_visibilities(self, sci_block):
+        """Compute complex visibilities after loading."""
+        sci_block.load()
+        sci_block.compute_complex_visibilities()
+        assert sci_block.complex_visibilities is not None
+        assert sci_block.complex_visibilities.shape == sci_block.cubes.shape
+        assert np.iscomplexobj(sci_block.complex_visibilities)
+
+    def test_power_computed_by_default(self, sci_block):
+        """Power spectra computed by default."""
+        sci_block.load()
+        sci_block.compute_complex_visibilities()
+        assert sci_block.power_spectra is not None
+        assert sci_block.power_spectra.shape == sci_block.cubes.shape
+
+    def test_power_not_computed_when_disabled(self, sci_block):
+        """Power spectra not computed when disabled."""
+        sci_block.load()
+        sci_block.compute_complex_visibilities(compute_power=False)
+        assert sci_block.complex_visibilities is not None
+        assert sci_block.power_spectra is None
+
+    def test_complex_vis_not_loaded(self, sci_block):
+        """Raise RuntimeError if not loaded."""
+        with pytest.raises(RuntimeError, match="not been loaded"):
+            sci_block.compute_complex_visibilities()
+
+    def test_power_equals_abs_squared(self, sci_block):
+        """Power spectrum equals |complex_vis|^2."""
+        sci_block.load()
+        sci_block.compute_complex_visibilities()
+        expected = np.abs(sci_block.complex_visibilities) ** 2
+        np.testing.assert_allclose(sci_block.power_spectra, expected)
+
+
+class TestPowerSpectra:
+    """Tests for power spectrum computation."""
+
+    def test_compute_power_spectra(self, sci_block):
+        """Compute power spectra after loading."""
+        sci_block.load()
+        sci_block.compute_power_spectra()
+        assert sci_block.power_spectra is not None
+        assert sci_block.power_spectra.shape == sci_block.cubes.shape
+
+    def test_power_spectra_computes_complex_vis(self, sci_block):
+        """Power spectra triggers complex visibilities computation."""
+        sci_block.load()
+        sci_block.compute_power_spectra()
+        assert sci_block.complex_visibilities is not None
+
+    def test_power_from_existing_complex_vis(self, sci_block):
+        """Compute power from pre-existing complex visibilities."""
+        sci_block.load()
+        sci_block.compute_complex_visibilities(compute_power=False)
+        assert sci_block.power_spectra is None
+        sci_block.compute_power_spectra()
+        assert sci_block.power_spectra is not None
+
+    def test_power_spectra_not_loaded(self, sci_block):
+        """Raise RuntimeError if not loaded."""
+        with pytest.raises(RuntimeError, match="not been loaded"):
+            sci_block.compute_power_spectra()
+
+    def test_power_spectra_nonnegative(self, sci_block):
+        """Power spectra are non-negative."""
+        sci_block.load()
+        sci_block.compute_power_spectra()
+        assert np.all(sci_block.power_spectra >= 0)
+
+    def test_power_spectra_dtype(self, sci_block):
+        """Power spectra have float dtype."""
+        sci_block.load()
+        sci_block.compute_power_spectra()
+        assert sci_block.power_spectra.dtype == np.float64
+
+    def test_sequence_compute_all_power_spectra(self, sci_block, cal_block):
+        """Compute power spectra for all blocks."""
+        seq = ObservingSequence(
+            blocks=[sci_block, cal_block],
+            name="test sequence",
+        )
+        seq.load_all()
+        seq.compute_all_power_spectra()
+        for block in seq:
+            assert block.power_spectra is not None
+            assert block.power_spectra.shape == block.cubes.shape
+
+    def test_sequence_compute_all_complex_vis(self, sci_block, cal_block):
+        """Compute complex visibilities for all blocks."""
+        seq = ObservingSequence(
+            blocks=[sci_block, cal_block],
+            name="test sequence",
+        )
+        seq.load_all()
+        seq.compute_all_complex_visibilities()
+        for block in seq:
+            assert block.complex_visibilities is not None
+            assert block.power_spectra is not None
+
+    def test_sequence_complex_vis_no_power(self, sci_block, cal_block):
+        """Compute complex visibilities without power for sequence."""
+        seq = ObservingSequence(
+            blocks=[sci_block, cal_block],
+        )
+        seq.load_all()
+        seq.compute_all_complex_visibilities(compute_power=False)
+        for block in seq:
+            assert block.complex_visibilities is not None
+            assert block.power_spectra is None
+
+    def test_sequence_skips_unloaded(self, sci_block, cal_block):
+        """Skip unloaded blocks without error."""
+        sci_block.load()
+        seq = ObservingSequence(
+            blocks=[sci_block, cal_block],
+        )
+        seq.compute_all_power_spectra()
+        assert sci_block.power_spectra is not None
+        assert cal_block.power_spectra is None
+
+    def test_sequence_skips_already_computed(self, sci_block):
+        """Do not recompute existing power spectra."""
+        sci_block.load()
+        sci_block.compute_power_spectra()
+        original = sci_block.power_spectra.copy()
+        seq = ObservingSequence(blocks=[sci_block])
+        seq.compute_all_power_spectra()
+        np.testing.assert_array_equal(sci_block.power_spectra, original)
+
+    def test_sequence_complex_vis_skips_unloaded(self, sci_block, cal_block):
+        """Skip unloaded blocks when computing complex visibility."""
+        sci_block.load()
+        seq = ObservingSequence(
+            blocks=[sci_block, cal_block],
+        )
+        seq.compute_all_complex_visibilities()
+        assert sci_block.complex_visibilities is not None
+        assert cal_block.complex_visibilities is None
+
+
 class TestObservingSequence:
     """Tests for the ObservingSequence container."""
 

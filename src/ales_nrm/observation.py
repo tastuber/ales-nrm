@@ -72,6 +72,15 @@ class ObservingBlock:
         stacking_method: The combination method used for stacking
             (``'median'`` or ``'mean'``). ``None`` before
             ``stack_frames()`` is called.
+        complex_visibilities: 4D complex numpy array of shape
+            ``(n_files, n_wavelengths, ny, nx)`` containing the complex
+            Fourier transform for each frame and wavelength, with zero
+            frequency at center. ``None`` before
+            ``compute_complex_visibilities()`` is called.
+        power_spectra: 4D numpy array of shape
+            ``(n_files, n_wavelengths, ny, nx)`` containing the power
+            spectrum (|FFT|^2) for each frame and wavelength, with zero
+            frequency at center. ``None`` before computed.
     """
 
     block_type: BlockType
@@ -98,6 +107,14 @@ class ObservingBlock:
         repr=False,
     )
     stacking_method: str | None = field(
+        default=None,
+        repr=False,
+    )
+    complex_visibilities: np.ndarray | None = field(
+        default=None,
+        repr=False,
+    )
+    power_spectra: np.ndarray | None = field(
         default=None,
         repr=False,
     )
@@ -516,6 +533,86 @@ class ObservingBlock:
         )
         return " ".join(parts)
 
+    def compute_complex_visibilities(
+        self,
+        compute_power: bool = True,
+    ) -> None:
+        """Compute complex visibilities for all frames.
+
+        Computes the Fourier transform of each 2D wavelength
+        slice with pre- and post-fftshift for correct phase
+        reference at image center.
+
+        Args:
+            compute_power: If True (default), also compute
+                and store the power spectrum as |FFT|^2.
+
+        Raises:
+            RuntimeError: If data has not been loaded.
+        """
+        if not self.is_loaded:
+            raise RuntimeError(
+                f"Block '{self.target}' "
+                f"({self.block_type.value}) has not been "
+                f"loaded. Call load() first."
+            )
+
+        n_files, n_wav, ny, nx = self.cubes.shape
+        self.complex_visibilities = np.empty_like(
+            self.cubes, dtype=np.complex128
+        )
+
+        # Avoiding the loops and using the axes argument of fft2 and
+        # fftshift brings no speed gain.
+        for f in range(n_files):
+            for w in range(n_wav):
+                self.complex_visibilities[f, w] = np.fft.fftshift(
+                    np.fft.fft2(np.fft.fftshift(self.cubes[f, w]))
+                )
+
+        logger.info(
+            "Computed complex visibilities for %s block '%s': shape=%s.",
+            self.block_type.value,
+            self.target,
+            self.complex_visibilities.shape,
+        )
+
+        if compute_power:
+            self.power_spectra = np.abs(self.complex_visibilities) ** 2
+            logger.info(
+                "Computed power spectra for %s block '%s': shape=%s.",
+                self.block_type.value,
+                self.target,
+                self.power_spectra.shape,
+            )
+
+    def compute_power_spectra(self) -> None:
+        """Compute power spectra from complex visibilities.
+
+        If complex visibilities have not been computed, calls
+        ``compute_complex_visibilities()`` first.
+
+        Raises:
+            RuntimeError: If data has not been loaded.
+        """
+        if not self.is_loaded:
+            raise RuntimeError(
+                f"Block '{self.target}' "
+                f"({self.block_type.value}) has not been "
+                f"loaded. Call load() first."
+            )
+
+        if self.complex_visibilities is None:
+            self.compute_complex_visibilities(compute_power=True)
+        else:
+            self.power_spectra = np.abs(self.complex_visibilities) ** 2
+            logger.info(
+                "Computed power spectra for %s block '%s': shape=%s.",
+                self.block_type.value,
+                self.target,
+                self.power_spectra.shape,
+            )
+
 
 @dataclass
 class ObservingSequence:
@@ -635,6 +732,51 @@ class ObservingSequence:
             lines.append(f"  [{i}] {block.summary()}")
 
         return "\n".join(lines)
+
+    def compute_all_complex_visibilities(
+        self,
+        compute_power: bool = True,
+    ) -> None:
+        """Compute complex visibilities for all loaded blocks.
+
+        Args:
+            compute_power: If True, also compute power spectra.
+        """
+        logger.info(
+            "Computing complex visibilities for all %d "
+            "blocks in sequence '%s'.",
+            len(self.blocks),
+            self.name,
+        )
+        for block in self.blocks:
+            if not block.is_loaded:
+                logger.warning(
+                    "Skipping unloaded block '%s'.",
+                    block.target,
+                )
+                continue
+            if block.complex_visibilities is None:
+                block.compute_complex_visibilities(compute_power=compute_power)
+
+    def compute_all_power_spectra(self) -> None:
+        """Compute power spectra for all loaded blocks.
+
+        Skips blocks that already have power spectra or are not loaded.
+        """
+        logger.info(
+            "Computing power spectra for all %d blocks in sequence '%s'.",
+            len(self.blocks),
+            self.name,
+        )
+        for block in self.blocks:
+            if not block.is_loaded:
+                logger.warning(
+                    "Skipping unloaded block '%s'.",
+                    block.target,
+                )
+                continue
+            if block.power_spectra is None:
+                block.compute_power_spectra()
 
     def __len__(self) -> int:
         """Return the number of blocks."""
