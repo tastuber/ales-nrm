@@ -95,13 +95,52 @@ def read_wavelengths(header: fits.Header) -> np.ndarray:
     return wavelengths
 
 
+def _pad_to_square(cube: np.ndarray) -> np.ndarray:
+    """Pad a 3D cube to have square spatial dimensions.
+
+    If the spatial dimensions (last two axes) differ, the smaller axis
+    is zero-padded at the end (bottom rows or right columns) to match
+    the larger axis. The original data occupies the top-left corner of
+    the padded frame.
+
+    Args:
+        cube: 3D array with shape
+            ``(n_wavelengths, ny, nx)``.
+
+    Returns:
+        3D array with shape
+        ``(n_wavelengths, n_square, n_square)`` where
+        ``n_square = max(ny, nx)``. If already square, returns the input
+        unchanged.
+    """
+    ny, nx = cube.shape[-2], cube.shape[-1]
+    if ny == nx:
+        return cube
+
+    n_square = max(ny, nx)
+    padded_shape = (*cube.shape[:-2], n_square, n_square)
+    padded = np.zeros(padded_shape, dtype=cube.dtype)
+
+    padded[..., :ny, :nx] = cube
+
+    logger.debug(
+        "Padded cube from (%d, %d) to (%d, %d).",
+        ny,
+        nx,
+        n_square,
+        n_square,
+    )
+    return padded
+
+
 def read_cube(
     filepath: str | Path,
 ) -> tuple[np.ndarray, np.ndarray, fits.Header]:
     """Read a single ALES spectral cube from a FITS file.
 
     Reads the primary HDU data and extracts the wavelength array from
-    the SLICEnnn header keywords.
+    the SLICEnnn header keywords. Non-square spatial dimensions are
+    zero-padded to square.
 
     Args:
         filepath: Path to the FITS file (.fits or .fits.gz).
@@ -109,7 +148,8 @@ def read_cube(
     Returns:
         A tuple of ``(cube, wavelengths, header)`` where:
             - ``cube`` is a 3D numpy array with shape
-              ``(n_wavelengths, ny, nx)``.
+              ``(n_wavelengths, n_square, n_square)`` where
+              ``n_square = max(ny, nx)``.
             - ``wavelengths`` is a 1D numpy array of wavelengths in
               microns.
             - ``header`` is the full FITS header.
@@ -140,15 +180,29 @@ def read_cube(
     if not data.dtype.isnative:
         data = data.astype(data.dtype.newbyteorder("="))
 
+    # Pad to square spatial dimensions.
+    orig_shape = data.shape
+    data = _pad_to_square(data)
+
     wavelengths = read_wavelengths(header)
 
-    logger.info(
-        "Read cube from %s: shape=%s, λ=%.3f–%.3f µm",
-        filepath.name,
-        data.shape,
-        wavelengths[0],
-        wavelengths[-1],
-    )
+    if data.shape == orig_shape:
+        logger.info(
+            "Read cube from %s: shape=%s, λ=%.3f–%.3f µm",
+            filepath.name,
+            data.shape,
+            wavelengths[0],
+            wavelengths[-1],
+        )
+    else:
+        logger.info(
+            "Read cube from %s: shape=%s, padded to shape=%s, λ=%.3f–%.3f µm",
+            filepath.name,
+            orig_shape,
+            data.shape,
+            wavelengths[0],
+            wavelengths[-1],
+        )
 
     return data, wavelengths, header
 
