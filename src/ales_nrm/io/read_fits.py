@@ -95,13 +95,24 @@ def read_wavelengths(header: fits.Header) -> np.ndarray:
     return wavelengths
 
 
-def _pad_to_square(cube: np.ndarray) -> np.ndarray:
-    """Pad a 3D cube to have square spatial dimensions.
+def _ensure_odd(n: int) -> int:
+    """Round up to the nearest odd integer if even.
 
-    If the spatial dimensions (last two axes) differ, the smaller axis
-    is zero-padded at the end (bottom rows or right columns) to match
-    the larger axis. The original data occupies the top-left corner of
-    the padded frame.
+    Args:
+        n: Input integer.
+
+    Returns:
+        The input unchanged if odd, or ``n + 1`` if even.
+    """
+    return n if n % 2 == 1 else n + 1
+
+
+def _pad_to_square(cube: np.ndarray) -> np.ndarray:
+    """Pad a 3D cube to have odd, square spatial dimensions.
+
+    If the spatial dimensions (last two axes) differ or are even, zero
+    rows or columns are appended at the bottom or right edge. The
+    original data occupies the top-left corner of the padded frame.
 
     Args:
         cube: 3D array with shape
@@ -109,16 +120,17 @@ def _pad_to_square(cube: np.ndarray) -> np.ndarray:
 
     Returns:
         3D array with shape
-        ``(n_wavelengths, n_square, n_square)`` where
-        ``n_square = max(ny, nx)``. If already square, returns the input
-        unchanged.
+        ``(n_wavelengths, n_out, n_out)`` where
+        ``n_out = _ensure_odd(max(ny, nx))``. If already odd and square,
+        returns the input unchanged.
     """
     ny, nx = cube.shape[-2], cube.shape[-1]
-    if ny == nx:
+    n_out = _ensure_odd(max(ny, nx))
+
+    if ny == n_out and nx == n_out:
         return cube
 
-    n_square = max(ny, nx)
-    padded_shape = (*cube.shape[:-2], n_square, n_square)
+    padded_shape = (*cube.shape[:-2], n_out, n_out)
     padded = np.zeros(padded_shape, dtype=cube.dtype)
 
     padded[..., :ny, :nx] = cube
@@ -127,8 +139,8 @@ def _pad_to_square(cube: np.ndarray) -> np.ndarray:
         "Padded cube from (%d, %d) to (%d, %d).",
         ny,
         nx,
-        n_square,
-        n_square,
+        n_out,
+        n_out,
     )
     return padded
 
@@ -147,9 +159,9 @@ def read_cube(
 
     Returns:
         A tuple of ``(cube, wavelengths, header)`` where:
-            - ``cube`` is a 3D numpy array with shape
-              ``(n_wavelengths, n_square, n_square)`` where
-              ``n_square = max(ny, nx)``.
+            - ``cube`` is a 3D numpy array with square spatial shape
+              ``(n_wavelengths, n_out, n_out)`` where ``n_out`` is odd
+              and ``>= max(ny, nx)``.
             - ``wavelengths`` is a 1D numpy array of wavelengths in
               microns.
             - ``header`` is the full FITS header.
