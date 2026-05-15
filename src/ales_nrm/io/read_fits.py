@@ -24,6 +24,8 @@ from pathlib import Path
 import numpy as np
 from astropy.io import fits
 
+from ales_nrm.utilities import ensure_odd
+
 logger = logging.getLogger(__name__)
 
 # Regex pattern to extract the file number from the filename.
@@ -95,18 +97,6 @@ def read_wavelengths(header: fits.Header) -> np.ndarray:
     return wavelengths
 
 
-def _ensure_odd(n: int) -> int:
-    """Round up to the nearest odd integer if even.
-
-    Args:
-        n: Input integer.
-
-    Returns:
-        The input unchanged if odd, or ``n + 1`` if even.
-    """
-    return n if n % 2 == 1 else n + 1
-
-
 def _pad_to_square(cube: np.ndarray) -> np.ndarray:
     """Pad a 3D cube to have odd, square spatial dimensions.
 
@@ -121,11 +111,11 @@ def _pad_to_square(cube: np.ndarray) -> np.ndarray:
     Returns:
         3D array with shape
         ``(n_wavelengths, n_out, n_out)`` where
-        ``n_out = _ensure_odd(max(ny, nx))``. If already odd and square,
+        ``n_out = ensure_odd(max(ny, nx))``. If already odd and square,
         returns the input unchanged.
     """
     ny, nx = cube.shape[-2], cube.shape[-1]
-    n_out = _ensure_odd(max(ny, nx))
+    n_out = ensure_odd(max(ny, nx))
 
     if ny == n_out and nx == n_out:
         return cube

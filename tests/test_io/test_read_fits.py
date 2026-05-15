@@ -5,7 +5,6 @@ import pytest
 from astropy.io import fits
 
 from ales_nrm.io.read_fits import (
-    _ensure_odd,
     _pad_to_square,
     find_cubes,
     parse_file_number,
@@ -80,26 +79,6 @@ class TestReadWavelengths:
         # Missing SLICE002 through SLICE004
         with pytest.raises(ValueError, match="missing from the header"):
             read_wavelengths(header)
-
-
-class TestEnsureOdd:
-    """Tests for the _ensure_odd helper."""
-
-    def test_odd_unchanged(self):
-        """Odd input is returned unchanged."""
-        assert _ensure_odd(67) == 67
-
-    def test_even_incremented(self):
-        """Even input is incremented by one."""
-        assert _ensure_odd(64) == 65
-
-    def test_one(self):
-        """One is already odd."""
-        assert _ensure_odd(1) == 1
-
-    def test_two(self):
-        """Two becomes three."""
-        assert _ensure_odd(2) == 3
 
 
 class TestPadToSquare:
