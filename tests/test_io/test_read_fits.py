@@ -5,6 +5,7 @@ import pytest
 from astropy.io import fits
 
 from ales_nrm.io.read_fits import (
+    _ensure_odd,
     _pad_to_square,
     find_cubes,
     parse_file_number,
@@ -81,26 +82,58 @@ class TestReadWavelengths:
             read_wavelengths(header)
 
 
+class TestEnsureOdd:
+    """Tests for the _ensure_odd helper."""
+
+    def test_odd_unchanged(self):
+        """Odd input is returned unchanged."""
+        assert _ensure_odd(67) == 67
+
+    def test_even_incremented(self):
+        """Even input is incremented by one."""
+        assert _ensure_odd(64) == 65
+
+    def test_one(self):
+        """One is already odd."""
+        assert _ensure_odd(1) == 1
+
+    def test_two(self):
+        """Two becomes three."""
+        assert _ensure_odd(2) == 3
+
+
 class TestPadToSquare:
     """Tests for the _pad_to_square helper."""
 
-    def test_already_square(self):
-        """Square input is returned unchanged."""
-        cube = np.ones((10, 64, 64))
+    def test_already_odd_square(self):
+        """Odd square input is returned unchanged."""
+        cube = np.ones((10, 67, 67))
         result = _pad_to_square(cube)
         assert result is cube
 
-    def test_ny_less_than_nx(self):
-        """Pad y dimension when ny < nx."""
+    def test_even_square_padded_to_odd(self):
+        """Even square input is padded to odd."""
+        cube = np.ones((10, 64, 64))
+        result = _pad_to_square(cube)
+        assert result.shape == (10, 65, 65)
+
+    def test_ny_less_than_nx_odd(self):
+        """Pad y when ny < nx, result already odd."""
         cube = np.ones((5, 63, 67))
         result = _pad_to_square(cube)
         assert result.shape == (5, 67, 67)
 
-    def test_nx_less_than_ny(self):
-        """Pad x dimension when nx < ny."""
+    def test_nx_less_than_ny_odd(self):
+        """Pad x when nx < ny, result already odd."""
         cube = np.ones((5, 67, 63))
         result = _pad_to_square(cube)
         assert result.shape == (5, 67, 67)
+
+    def test_even_max_padded_to_odd(self):
+        """Even max dimension is padded to next odd."""
+        cube = np.ones((5, 60, 64))
+        result = _pad_to_square(cube)
+        assert result.shape == (5, 65, 65)
 
     def test_data_at_origin(self):
         """Data occupies the top-left corner."""
@@ -111,23 +144,36 @@ class TestPadToSquare:
             1.0,
         )
 
-    def test_padding_is_zeros(self):
-        """Padded regions are zero."""
+    def test_padding_is_zeros_bottom(self):
+        """Bottom rows are zero."""
         cube = np.ones((2, 63, 67))
         result = _pad_to_square(cube)
-        # Bottom rows (63:67) should be zero.
         np.testing.assert_array_equal(
             result[:, 63:, :],
             0.0,
         )
 
     def test_padding_right_columns(self):
-        """Right columns are zero when nx < ny."""
+        """Right columns are zero when nx < n_out."""
         cube = np.ones((2, 67, 63))
         result = _pad_to_square(cube)
-        # Right columns (63:67) should be zero.
         np.testing.assert_array_equal(
             result[:, :, 63:],
+            0.0,
+        )
+
+    def test_even_square_padding_is_zeros(self):
+        """Padded row and column are zero for even input."""
+        cube = np.ones((2, 64, 64))
+        result = _pad_to_square(cube)
+        # Row 64 should be zero.
+        np.testing.assert_array_equal(
+            result[:, 64, :],
+            0.0,
+        )
+        # Column 64 should be zero.
+        np.testing.assert_array_equal(
+            result[:, :, 64],
             0.0,
         )
 
@@ -146,8 +192,8 @@ class TestPadToSquare:
             np.sum(cube),
         )
 
-    def test_difference_of_one(self):
-        """Handle case where dimensions differ by one."""
+    def test_difference_of_one_odd_result(self):
+        """Dimensions 66×67: max is 67 (odd), no extra pad."""
         cube = np.ones((3, 66, 67))
         result = _pad_to_square(cube)
         assert result.shape == (3, 67, 67)
@@ -155,7 +201,6 @@ class TestPadToSquare:
             result[:, :66, :],
             1.0,
         )
-        # Last row should be zero.
         np.testing.assert_array_equal(
             result[:, 66, :],
             0.0,
@@ -167,13 +212,41 @@ class TestPadToSquare:
         result = _pad_to_square(cube)
         assert result.shape == (2, 67, 67)
         np.testing.assert_array_equal(
-            result[:, :30, :],
+            result[:, :30, :67],
             1.0,
         )
         np.testing.assert_array_equal(
             result[:, 30:, :],
             0.0,
         )
+
+    def test_both_even_dimensions(self):
+        """Both even dimensions pad to odd square."""
+        cube = np.ones((3, 62, 68))
+        result = _pad_to_square(cube)
+        # max(62, 68) = 68, ensure_odd(68) = 69
+        assert result.shape == (3, 69, 69)
+        np.testing.assert_array_equal(
+            result[:, :62, :68],
+            1.0,
+        )
+        np.testing.assert_array_equal(
+            result[:, 62:, :],
+            0.0,
+        )
+        np.testing.assert_array_equal(
+            result[:, :, 68:],
+            0.0,
+        )
+
+    def test_result_always_odd(self):
+        """Result dimension is always odd."""
+        for ny, nx in [(63, 67), (64, 64), (100, 50), (51, 52)]:
+            cube = np.ones((2, ny, nx))
+            result = _pad_to_square(cube)
+            assert result.shape[-1] % 2 == 1
+            assert result.shape[-2] % 2 == 1
+            assert result.shape[-1] == result.shape[-2]
 
 
 class TestReadCube:
@@ -203,12 +276,13 @@ class TestReadCube:
     def test_read_pads_to_square(
         self, tmp_path, sample_cube, sample_wavelengths
     ):
-        """Non-square cube is padded to square on read."""
+        """Non-square cube is padded to odd square on read."""
         filepath = tmp_path / "cube_lm_251108_005001.fits"
         write_test_cube(filepath, sample_cube, sample_wavelengths)
 
         cube, _, _ = read_cube(filepath)
         assert cube.shape[-2] == cube.shape[-1]
+        assert cube.shape[-1] % 2 == 1
         assert cube.shape == (98, 67, 67)
 
     def test_read_preserves_data_in_padded_region(
@@ -225,17 +299,32 @@ class TestReadCube:
             sample_cube,
         )
 
-    def test_read_square_cube_unchanged(
+    def test_read_even_square_pads_to_odd(
         self, tmp_path, rng, sample_wavelengths
     ):
-        """A square cube is not modified by padding."""
-        square_cube = rng.normal(100.0, 10.0, size=(98, 64, 64))
+        """An even square cube is padded to odd square."""
+        even_cube = rng.normal(100.0, 10.0, size=(98, 64, 64))
         filepath = tmp_path / "cube_lm_251108_005001.fits"
-        write_test_cube(filepath, square_cube, sample_wavelengths)
+        write_test_cube(filepath, even_cube, sample_wavelengths)
 
         cube, _, _ = read_cube(filepath)
-        assert cube.shape == (98, 64, 64)
-        np.testing.assert_allclose(cube, square_cube)
+        assert cube.shape == (98, 65, 65)
+        np.testing.assert_allclose(
+            cube[:, :64, :64],
+            even_cube,
+        )
+
+    def test_read_odd_square_cube_unchanged(
+        self, tmp_path, rng, sample_wavelengths
+    ):
+        """An odd square cube is not modified."""
+        odd_cube = rng.normal(100.0, 10.0, size=(98, 65, 65))
+        filepath = tmp_path / "cube_lm_251108_005001.fits"
+        write_test_cube(filepath, odd_cube, sample_wavelengths)
+
+        cube, _, _ = read_cube(filepath)
+        assert cube.shape == (98, 65, 65)
+        np.testing.assert_allclose(cube, odd_cube)
 
     def test_file_not_found(self, tmp_path):
         """Raise FileNotFoundError for a nonexistent file."""
