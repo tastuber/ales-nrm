@@ -5,6 +5,7 @@ import pytest
 from astropy.io import fits
 
 from ales_nrm.io.read_fits import (
+    _pad_to_square,
     find_cubes,
     parse_file_number,
     read_cube,
@@ -80,18 +81,113 @@ class TestReadWavelengths:
             read_wavelengths(header)
 
 
+class TestPadToSquare:
+    """Tests for the _pad_to_square helper."""
+
+    def test_already_square(self):
+        """Square input is returned unchanged."""
+        cube = np.ones((10, 64, 64))
+        result = _pad_to_square(cube)
+        assert result is cube
+
+    def test_ny_less_than_nx(self):
+        """Pad y dimension when ny < nx."""
+        cube = np.ones((5, 63, 67))
+        result = _pad_to_square(cube)
+        assert result.shape == (5, 67, 67)
+
+    def test_nx_less_than_ny(self):
+        """Pad x dimension when nx < ny."""
+        cube = np.ones((5, 67, 63))
+        result = _pad_to_square(cube)
+        assert result.shape == (5, 67, 67)
+
+    def test_data_at_origin(self):
+        """Data occupies the top-left corner."""
+        cube = np.ones((2, 63, 67))
+        result = _pad_to_square(cube)
+        np.testing.assert_array_equal(
+            result[:, :63, :67],
+            1.0,
+        )
+
+    def test_padding_is_zeros(self):
+        """Padded regions are zero."""
+        cube = np.ones((2, 63, 67))
+        result = _pad_to_square(cube)
+        # Bottom rows (63:67) should be zero.
+        np.testing.assert_array_equal(
+            result[:, 63:, :],
+            0.0,
+        )
+
+    def test_padding_right_columns(self):
+        """Right columns are zero when nx < ny."""
+        cube = np.ones((2, 67, 63))
+        result = _pad_to_square(cube)
+        # Right columns (63:67) should be zero.
+        np.testing.assert_array_equal(
+            result[:, :, 63:],
+            0.0,
+        )
+
+    def test_preserves_dtype(self, rng):
+        """Output dtype matches input dtype."""
+        cube = rng.normal(size=(3, 63, 67)).astype(np.float32)
+        result = _pad_to_square(cube)
+        assert result.dtype == np.float32
+
+    def test_total_flux_preserved(self, rng):
+        """Total flux is preserved since padding is zeros."""
+        cube = rng.normal(100, 10, size=(5, 63, 67))
+        result = _pad_to_square(cube)
+        np.testing.assert_allclose(
+            np.sum(result),
+            np.sum(cube),
+        )
+
+    def test_difference_of_one(self):
+        """Handle case where dimensions differ by one."""
+        cube = np.ones((3, 66, 67))
+        result = _pad_to_square(cube)
+        assert result.shape == (3, 67, 67)
+        np.testing.assert_array_equal(
+            result[:, :66, :],
+            1.0,
+        )
+        # Last row should be zero.
+        np.testing.assert_array_equal(
+            result[:, 66, :],
+            0.0,
+        )
+
+    def test_large_difference(self):
+        """Handle large difference between dimensions."""
+        cube = np.ones((2, 30, 67))
+        result = _pad_to_square(cube)
+        assert result.shape == (2, 67, 67)
+        np.testing.assert_array_equal(
+            result[:, :30, :],
+            1.0,
+        )
+        np.testing.assert_array_equal(
+            result[:, 30:, :],
+            0.0,
+        )
+
+
 class TestReadCube:
     """Tests for read_cube."""
 
     def test_read_fits(self, tmp_path, sample_cube, sample_wavelengths):
-        """Read a .fits file and recover data and wavelengths."""
+        """Read a .fits file and recover wavelengths."""
         filepath = tmp_path / "cube_lm_251108_005001.fits"
         write_test_cube(filepath, sample_cube, sample_wavelengths)
 
         cube, wavelengths, header = read_cube(filepath)
 
-        assert cube.shape == sample_cube.shape
-        np.testing.assert_allclose(cube, sample_cube)
+        # Padded from (98, 63, 67) to (98, 67, 67).
+        assert cube.shape == (98, 67, 67)
         np.testing.assert_allclose(wavelengths, sample_wavelengths)
 
     def test_read_gzipped(self, tmp_path, sample_cube, sample_wavelengths):
@@ -101,7 +197,45 @@ class TestReadCube:
 
         cube, wavelengths, header = read_cube(filepath)
 
-        assert cube.shape == sample_cube.shape
+        # Padded from (98, 63, 67) to (98, 67, 67).
+        assert cube.shape == (98, 67, 67)
+
+    def test_read_pads_to_square(
+        self, tmp_path, sample_cube, sample_wavelengths
+    ):
+        """Non-square cube is padded to square on read."""
+        filepath = tmp_path / "cube_lm_251108_005001.fits"
+        write_test_cube(filepath, sample_cube, sample_wavelengths)
+
+        cube, _, _ = read_cube(filepath)
+        assert cube.shape[-2] == cube.shape[-1]
+        assert cube.shape == (98, 67, 67)
+
+    def test_read_preserves_data_in_padded_region(
+        self, tmp_path, sample_cube, sample_wavelengths
+    ):
+        """Data values preserved in top-left corner."""
+        filepath = tmp_path / "cube_lm_251108_005001.fits"
+        write_test_cube(filepath, sample_cube, sample_wavelengths)
+
+        cube, _, _ = read_cube(filepath)
+
+        np.testing.assert_allclose(
+            cube[:, :63, :67],
+            sample_cube,
+        )
+
+    def test_read_square_cube_unchanged(
+        self, tmp_path, rng, sample_wavelengths
+    ):
+        """A square cube is not modified by padding."""
+        square_cube = rng.normal(100.0, 10.0, size=(98, 64, 64))
+        filepath = tmp_path / "cube_lm_251108_005001.fits"
+        write_test_cube(filepath, square_cube, sample_wavelengths)
+
+        cube, _, _ = read_cube(filepath)
+        assert cube.shape == (98, 64, 64)
+        np.testing.assert_allclose(cube, square_cube)
 
     def test_file_not_found(self, tmp_path):
         """Raise FileNotFoundError for a nonexistent file."""
@@ -230,7 +364,8 @@ class TestReadCubes:
 
         assert isinstance(cubes, np.ndarray)
         assert cubes.ndim == 4
-        assert cubes.shape == (3, *sample_cube.shape)
+        # Padded from (98, 63, 67) to (98, 67, 67).
+        assert cubes.shape == (3, 98, 67, 67)
         assert len(headers) == 3
         np.testing.assert_allclose(wavelengths, sample_wavelengths)
 
@@ -292,13 +427,16 @@ class TestReadCubes:
         sample_cube,
         sample_wavelengths,
     ):
-        """Verify that pixel values are preserved through read/write."""
+        """Read/write preserves pixel values in top-left corner."""
         filepath = tmp_path / "cube_lm_251108_005001.fits"
         write_test_cube(filepath, sample_cube, sample_wavelengths)
 
         cubes, _, _, _ = read_cubes(tmp_path)
 
-        np.testing.assert_allclose(cubes[0], sample_cube)
+        np.testing.assert_allclose(
+            cubes[0, :, :63, :67],
+            sample_cube,
+        )
 
     def test_dtype_preserved(
         self,
