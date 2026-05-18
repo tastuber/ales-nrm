@@ -73,14 +73,18 @@ class ObservingBlock:
             (``'median'`` or ``'mean'``). ``None`` before
             ``stack_frames()`` is called.
         complex_visibilities: 4D complex numpy array of shape
-            ``(n_files, n_wavelengths, ny, nx)`` containing the complex
-            Fourier transform for each frame and wavelength, with zero
+            ``(n_files, n_wavelengths, n_fft, n_fft)`` containing the
+            complex Fourier transform for each frame and wavelength,
+            zero-padded to ``n_fft`` pixels per axis, with zero
             frequency at center. ``None`` before
             ``compute_complex_visibilities()`` is called.
         power_spectra: 4D numpy array of shape
-            ``(n_files, n_wavelengths, ny, nx)`` containing the power
-            spectrum (|FFT|^2) for each frame and wavelength, with zero
-            frequency at center. ``None`` before computed.
+            ``(n_files, n_wavelengths, n_fft, n_fft)`` containing the
+            power spectrum (|FFT|^2) for each frame and wavelength,
+            zero-padded to ``n_fft`` pixels per axis, with zero
+            frequency at center. ``None`` before
+            ``compute_complex_visibilities(compute_power=True)`` or
+            ``compute_power_spectra()`` are called.
     """
 
     block_type: BlockType
@@ -535,20 +539,29 @@ class ObservingBlock:
 
     def compute_complex_visibilities(
         self,
+        n_fft: int = 501,
         compute_power: bool = True,
     ) -> None:
         """Compute complex visibilities for all frames.
 
-        Computes the Fourier transform of each 2D wavelength
-        slice with pre- and post-fftshift for correct phase
-        reference at image center.
+        Computes the Fourier transform of each 2D wavelength slice with
+        pre- and post-fftshift for correct phase reference at image
+        center. The input image is zero-padded to ``n_fft x n_fft``
+        pixels before the FFT, increasing the sampling density in the
+        Fourier (u,v) plane.
 
         Args:
-            compute_power: If True (default), also compute
-                and store the power spectrum as |FFT|^2.
+            n_fft: Size of the zero-padded array along each spatial axis
+                before computing the FFT. Must be >= max(ny, nx). Forced
+                to odd via ``ensure_odd`` to guarantee a unique center
+                pixel. Default is 501.
+            compute_power: If True (default), also compute and store the
+                power spectrum as |FFT|^2.
 
         Raises:
             RuntimeError: If data has not been loaded.
+            ValueError: If n_fft is smaller than the spatial dimensions
+                of the loaded cubes.
         """
         if not self.is_loaded:
             raise RuntimeError(
@@ -557,24 +570,57 @@ class ObservingBlock:
                 f"loaded. Call load() first."
             )
 
+        from ales_nrm.utilities import ensure_odd
+
         n_files, n_wav, ny, nx = self.cubes.shape
-        self.complex_visibilities = np.empty_like(
-            self.cubes, dtype=np.complex128
+        n_fft = ensure_odd(n_fft)
+
+        if n_fft < max(ny, nx):
+            raise ValueError(
+                f"n_fft ({n_fft}) must be >= max(ny, nx) = {max(ny, nx)}."
+            )
+
+        self.complex_visibilities = np.empty(
+            (n_files, n_wav, n_fft, n_fft),
+            dtype=np.complex128,
         )
 
-        # Avoiding the loops and using the axes argument of fft2 and
-        # fftshift brings no speed gain.
+        # Compute symmetric padding for each spatial axis.
+        pad_y = n_fft - ny
+        pad_x = n_fft - nx
+        pad_before_y = pad_y // 2
+        pad_after_y = pad_y - pad_before_y
+        pad_before_x = pad_x // 2
+        pad_after_x = pad_x - pad_before_x
+        pad_width = (
+            (pad_before_y, pad_after_y),
+            (pad_before_x, pad_after_x),
+        )
+
         for f in range(n_files):
             for w in range(n_wav):
+                padded = np.pad(
+                    self.cubes[f, w],
+                    pad_width=pad_width,
+                    mode="constant",
+                    constant_values=0,
+                )
+
                 self.complex_visibilities[f, w] = np.fft.fftshift(
-                    np.fft.fft2(np.fft.fftshift(self.cubes[f, w]))
+                    np.fft.fft2(np.fft.fftshift(padded))
                 )
 
         logger.info(
-            "Computed complex visibilities for %s block '%s': shape=%s.",
+            "Computed complex visibilities for %s block "
+            "'%s': shape=%s (zero-padded from %dx%d to "
+            "%dx%d).",
             self.block_type.value,
             self.target,
             self.complex_visibilities.shape,
+            ny,
+            nx,
+            n_fft,
+            n_fft,
         )
 
         if compute_power:
@@ -586,11 +632,16 @@ class ObservingBlock:
                 self.power_spectra.shape,
             )
 
-    def compute_power_spectra(self) -> None:
+    def compute_power_spectra(self, n_fft: int = 501) -> None:
         """Compute power spectra from complex visibilities.
 
         If complex visibilities have not been computed, calls
-        ``compute_complex_visibilities()`` first.
+        ``compute_complex_visibilities()`` first with the given
+        ``n_fft``.
+
+        Args:
+            n_fft: Size of the zero-padded FFT. Only used if complex
+                visibilities have not yet been computed. Default is 501.
 
         Raises:
             RuntimeError: If data has not been loaded.
@@ -603,7 +654,7 @@ class ObservingBlock:
             )
 
         if self.complex_visibilities is None:
-            self.compute_complex_visibilities(compute_power=True)
+            self.compute_complex_visibilities(n_fft=n_fft, compute_power=True)
         else:
             self.power_spectra = np.abs(self.complex_visibilities) ** 2
             logger.info(
@@ -735,18 +786,21 @@ class ObservingSequence:
 
     def compute_all_complex_visibilities(
         self,
+        n_fft: int = 501,
         compute_power: bool = True,
     ) -> None:
         """Compute complex visibilities for all loaded blocks.
 
         Args:
+            n_fft: Size of the zero-padded FFT. Default is 501.
             compute_power: If True, also compute power spectra.
         """
         logger.info(
             "Computing complex visibilities for all %d "
-            "blocks in sequence '%s'.",
+            "blocks in sequence '%s' (n_fft=%d).",
             len(self.blocks),
             self.name,
+            n_fft,
         )
         for block in self.blocks:
             if not block.is_loaded:
@@ -756,12 +810,16 @@ class ObservingSequence:
                 )
                 continue
             if block.complex_visibilities is None:
-                block.compute_complex_visibilities(compute_power=compute_power)
+                block.compute_complex_visibilities(
+                    n_fft=n_fft,
+                    compute_power=compute_power,
+                )
 
-    def compute_all_power_spectra(self) -> None:
+    def compute_all_power_spectra(self, n_fft: int = 501) -> None:
         """Compute power spectra for all loaded blocks.
 
-        Skips blocks that already have power spectra or are not loaded.
+        Args:
+            n_fft: Size of the zero-padded FFT. Default is 501.
         """
         logger.info(
             "Computing power spectra for all %d blocks in sequence '%s'.",
@@ -776,7 +834,7 @@ class ObservingSequence:
                 )
                 continue
             if block.power_spectra is None:
-                block.compute_power_spectra()
+                block.compute_power_spectra(n_fft=n_fft)
 
     def __len__(self) -> int:
         """Return the number of blocks."""

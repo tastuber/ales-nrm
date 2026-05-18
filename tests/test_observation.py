@@ -745,15 +745,63 @@ class TestComplexVisibilities:
         sci_block.load()
         sci_block.compute_complex_visibilities()
         assert sci_block.complex_visibilities is not None
-        assert sci_block.complex_visibilities.shape == sci_block.cubes.shape
+        n_files, n_wav, ny, nx = sci_block.cubes.shape
+        assert sci_block.complex_visibilities.shape == (
+            n_files,
+            n_wav,
+            501,
+            501,
+        )
         assert np.iscomplexobj(sci_block.complex_visibilities)
+
+    def test_default_n_fft(self, sci_block):
+        """Default n_fft produces 501x501 output."""
+        sci_block.load()
+        sci_block.compute_complex_visibilities()
+        assert sci_block.complex_visibilities.shape[-1] == 501
+        assert sci_block.complex_visibilities.shape[-2] == 501
+
+    def test_custom_n_fft(self, sci_block):
+        """Custom n_fft changes output dimensions."""
+        sci_block.load()
+        sci_block.compute_complex_visibilities(n_fft=101)
+        assert sci_block.complex_visibilities.shape[-1] == 101
+        assert sci_block.complex_visibilities.shape[-2] == 101
+
+    def test_even_n_fft_forced_odd(self, sci_block):
+        """Even n_fft is forced to next odd value."""
+        sci_block.load()
+        sci_block.compute_complex_visibilities(n_fft=100)
+        assert sci_block.complex_visibilities.shape[-1] == 101
+        assert sci_block.complex_visibilities.shape[-2] == 101
+
+    def test_n_fft_too_small(self, sci_block):
+        """Raise ValueError if n_fft < spatial dimensions."""
+        sci_block.load()
+        with pytest.raises(ValueError, match="n_fft"):
+            sci_block.compute_complex_visibilities(n_fft=50)
+
+    def test_n_fft_equal_to_cube_size(self, sci_block):
+        """n_fft equal to cube size works (no padding)."""
+        sci_block.load()
+        sci_block.compute_complex_visibilities(n_fft=67)
+        n_files, n_wav, ny, nx = sci_block.cubes.shape
+        assert sci_block.complex_visibilities.shape == (
+            n_files,
+            n_wav,
+            67,
+            67,
+        )
 
     def test_power_computed_by_default(self, sci_block):
         """Power spectra computed by default."""
         sci_block.load()
         sci_block.compute_complex_visibilities()
         assert sci_block.power_spectra is not None
-        assert sci_block.power_spectra.shape == sci_block.cubes.shape
+        assert (
+            sci_block.power_spectra.shape
+            == sci_block.complex_visibilities.shape
+        )
 
     def test_power_not_computed_when_disabled(self, sci_block):
         """Power spectra not computed when disabled."""
@@ -774,6 +822,68 @@ class TestComplexVisibilities:
         expected = np.abs(sci_block.complex_visibilities) ** 2
         np.testing.assert_allclose(sci_block.power_spectra, expected)
 
+    def test_zero_padding_preserves_total_power(
+        self,
+        sci_block,
+    ):
+        """Zero-padding scales total power by (n_fft/n)^2.
+
+        Parseval's theorem: sum |FFT|^2 = N * sum |x|^2.
+        The ratio of total power between padded and unpadded
+        FFTs equals (n_fft / n_original)^2.
+        """
+        sci_block.load()
+
+        # Compute without padding.
+        sci_block.compute_complex_visibilities(n_fft=67)
+        power_no_pad = sci_block.power_spectra[0, 0].sum()
+
+        # Reset and compute with padding.
+        sci_block.complex_visibilities = None
+        sci_block.power_spectra = None
+        sci_block.compute_complex_visibilities(n_fft=501)
+        power_padded = sci_block.power_spectra[0, 0].sum()
+
+        # Ratio should be (501/67)^2.
+        expected_ratio = (501 / 67) ** 2
+        np.testing.assert_allclose(
+            power_padded / power_no_pad,
+            expected_ratio,
+            rtol=1e-10,
+        )
+
+    def test_zero_padding_center_pixel_is_total_flux(
+        self,
+        sci_block,
+    ):
+        """DC component equals sum of image pixels."""
+        sci_block.load()
+        sci_block.compute_complex_visibilities(n_fft=501)
+        center = 501 // 2
+        for w in range(3):
+            expected_dc = np.sum(sci_block.cubes[0, w])
+            actual_dc = sci_block.complex_visibilities[0, w, center, center]
+            np.testing.assert_allclose(
+                actual_dc.real,
+                expected_dc,
+                rtol=1e-10,
+            )
+            np.testing.assert_allclose(
+                actual_dc.imag,
+                0.0,
+                atol=1e-8,
+            )
+
+    def test_n_fft_output_is_always_odd(self, sci_block):
+        """Output dimensions are always odd."""
+        sci_block.load()
+        for n in [67, 100, 128, 256, 500, 501]:
+            sci_block.complex_visibilities = None
+            sci_block.power_spectra = None
+            sci_block.compute_complex_visibilities(n_fft=n)
+            assert sci_block.complex_visibilities.shape[-1] % 2 == 1
+            assert sci_block.complex_visibilities.shape[-2] % 2 == 1
+
 
 class TestPowerSpectra:
     """Tests for power spectrum computation."""
@@ -783,7 +893,20 @@ class TestPowerSpectra:
         sci_block.load()
         sci_block.compute_power_spectra()
         assert sci_block.power_spectra is not None
-        assert sci_block.power_spectra.shape == sci_block.cubes.shape
+        n_files, n_wav, ny, nx = sci_block.cubes.shape
+        assert sci_block.power_spectra.shape == (
+            n_files,
+            n_wav,
+            501,
+            501,
+        )
+
+    def test_power_spectra_custom_n_fft(self, sci_block):
+        """Power spectra with custom n_fft."""
+        sci_block.load()
+        sci_block.compute_power_spectra(n_fft=101)
+        assert sci_block.power_spectra.shape[-1] == 101
+        assert sci_block.power_spectra.shape[-2] == 101
 
     def test_power_spectra_computes_complex_vis(self, sci_block):
         """Power spectra triggers complex visibilities computation."""
@@ -826,7 +949,29 @@ class TestPowerSpectra:
         seq.compute_all_power_spectra()
         for block in seq:
             assert block.power_spectra is not None
-            assert block.power_spectra.shape == block.cubes.shape
+            n_files = block.cubes.shape[0]
+            n_wav = block.cubes.shape[1]
+            assert block.power_spectra.shape == (
+                n_files,
+                n_wav,
+                501,
+                501,
+            )
+
+    def test_sequence_compute_all_power_spectra_custom_n_fft(
+        self,
+        sci_block,
+        cal_block,
+    ):
+        """Sequence passes n_fft to all blocks."""
+        seq = ObservingSequence(
+            blocks=[sci_block, cal_block],
+        )
+        seq.load_all()
+        seq.compute_all_power_spectra(n_fft=201)
+        for block in seq:
+            assert block.power_spectra.shape[-1] == 201
+            assert block.power_spectra.shape[-2] == 201
 
     def test_sequence_compute_all_complex_vis(self, sci_block, cal_block):
         """Compute complex visibilities for all blocks."""
@@ -840,13 +985,34 @@ class TestPowerSpectra:
             assert block.complex_visibilities is not None
             assert block.power_spectra is not None
 
-    def test_sequence_complex_vis_no_power(self, sci_block, cal_block):
-        """Compute complex visibilities without power for sequence."""
+    def test_sequence_compute_all_complex_vis_custom_n_fft(
+        self,
+        sci_block,
+        cal_block,
+    ):
+        """Sequence passes n_fft to complex visibilities computation."""
         seq = ObservingSequence(
             blocks=[sci_block, cal_block],
         )
         seq.load_all()
-        seq.compute_all_complex_visibilities(compute_power=False)
+        seq.compute_all_complex_visibilities(n_fft=101, compute_power=False)
+        for block in seq:
+            assert block.complex_visibilities.shape[-1] == 101
+            assert block.complex_visibilities.shape[-2] == 101
+
+    def test_sequence_complex_vis_no_power(
+        self,
+        sci_block,
+        cal_block,
+    ):
+        """Compute complex visibilities without power."""
+        seq = ObservingSequence(
+            blocks=[sci_block, cal_block],
+        )
+        seq.load_all()
+        seq.compute_all_complex_visibilities(
+            compute_power=False,
+        )
         for block in seq:
             assert block.complex_visibilities is not None
             assert block.power_spectra is None
