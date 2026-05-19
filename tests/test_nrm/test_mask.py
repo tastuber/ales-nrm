@@ -196,6 +196,175 @@ class TestNRMMaskFromFile:
         assert mask.primary_diameter == 6.5
 
 
+class TestMaskRotationAtLoad:
+    """Tests for angle_deg parameter in factory methods."""
+
+    def test_zero_angle_matches_default(self):
+        """angle_deg=0.0 gives same result as no angle."""
+        mask_default = NRMMask.from_bundled("lbti_nrm6_sx")
+        mask_zero = NRMMask.from_bundled("lbti_nrm6_sx", angle_deg=0.0)
+        for h1, h2 in zip(mask_default.holes, mask_zero.holes, strict=True):
+            assert h1.x == pytest.approx(h2.x)
+            assert h1.y == pytest.approx(h2.y)
+            assert h1.radius == h2.radius
+            assert h1.name == h2.name
+
+    def test_nonzero_angle_changes_coordinates(self):
+        """Non-zero angle produces different coordinates."""
+        mask_plain = NRMMask.from_bundled("lbti_nrm6_sx")
+        mask_rotated = NRMMask.from_bundled("lbti_nrm6_sx", angle_deg=30.0)
+        any_different = False
+        for h1, h2 in zip(mask_plain.holes, mask_rotated.holes, strict=True):
+            if abs(h1.x - h2.x) > 1e-6:
+                any_different = True
+                break
+        assert any_different
+
+    def test_preserves_n_holes(self):
+        """Rotation preserves number of holes."""
+        mask = NRMMask.from_bundled("lbti_nrm6_sx", angle_deg=15.0)
+        assert mask.n_holes == 6
+
+    def test_preserves_n_baselines(self):
+        """Rotation preserves number of baselines."""
+        mask = NRMMask.from_bundled("lbti_nrm6_sx", angle_deg=15.0)
+        assert mask.n_baselines == 15
+
+    def test_preserves_baseline_lengths(self):
+        """Baseline lengths are invariant under rotation."""
+        mask_plain = NRMMask.from_bundled("lbti_nrm6_sx")
+        mask_rotated = NRMMask.from_bundled("lbti_nrm6_sx", angle_deg=23.7)
+        for bl1, bl2 in zip(
+            mask_plain.baselines,
+            mask_rotated.baselines,
+            strict=True,
+        ):
+            assert bl2.length == pytest.approx(bl1.length, rel=1e-10)
+
+    def test_preserves_hole_radii(self):
+        """Hole radii unchanged by rotation."""
+        mask_plain = NRMMask.from_bundled("lbti_nrm6_sx")
+        mask_rotated = NRMMask.from_bundled("lbti_nrm6_sx", angle_deg=45.0)
+        for h1, h2 in zip(mask_plain.holes, mask_rotated.holes, strict=True):
+            assert h2.radius == h1.radius
+
+    def test_preserves_hole_names(self):
+        """Hole names unchanged by rotation."""
+        mask_plain = NRMMask.from_bundled("lbti_nrm6_sx")
+        mask_rotated = NRMMask.from_bundled("lbti_nrm6_sx", angle_deg=45.0)
+        for h1, h2 in zip(mask_plain.holes, mask_rotated.holes, strict=True):
+            assert h2.name == h1.name
+
+    def test_preserves_primary_diameter(self):
+        """Primary diameter unchanged by rotation."""
+        mask = NRMMask.from_bundled("lbti_nrm6_sx", angle_deg=45.0)
+        assert mask.primary_diameter == 8.4
+
+    def test_centroid_invariant(self):
+        """Centroid of holes unchanged by rotation."""
+        mask_plain = NRMMask.from_bundled("lbti_nrm6_sx")
+        mask_rotated = NRMMask.from_bundled("lbti_nrm6_sx", angle_deg=45.0)
+        cx_orig = np.mean([h.x for h in mask_plain.holes])
+        cy_orig = np.mean([h.y for h in mask_plain.holes])
+        cx_rot = np.mean([h.x for h in mask_rotated.holes])
+        cy_rot = np.mean([h.y for h in mask_rotated.holes])
+        assert cx_rot == pytest.approx(cx_orig, abs=1e-10)
+        assert cy_rot == pytest.approx(cy_orig, abs=1e-10)
+
+    def test_360_returns_original(self):
+        """360 degree rotation returns original."""
+        mask_plain = NRMMask.from_bundled("lbti_nrm6_sx")
+        mask_360 = NRMMask.from_bundled("lbti_nrm6_sx", angle_deg=360.0)
+        for h1, h2 in zip(mask_plain.holes, mask_360.holes, strict=True):
+            assert h2.x == pytest.approx(h1.x, abs=1e-10)
+            assert h2.y == pytest.approx(h1.y, abs=1e-10)
+
+    def test_opposite_angles_differ(self):
+        """Loading with +θ and -θ gives different coords."""
+        mask_pos = NRMMask.from_bundled("lbti_nrm6_sx", angle_deg=17.3)
+        mask_neg = NRMMask.from_bundled("lbti_nrm6_sx", angle_deg=-17.3)
+        any_different = False
+        for h1, h2 in zip(mask_pos.holes, mask_neg.holes, strict=True):
+            if abs(h1.x - h2.x) > 1e-6:
+                any_different = True
+                break
+        assert any_different
+
+    def test_from_file_with_angle(self, tmp_path):
+        """from_file respects angle_deg parameter."""
+        mask_file = tmp_path / "test_mask.txt"
+        mask_file.write_text(
+            "H1 -1.0 0.0 0.4\nH2  1.0 0.0 0.4\nH3  0.0 1.5 0.4\n"
+        )
+        mask_0 = NRMMask.from_file(mask_file, angle_deg=0.0)
+        mask_45 = NRMMask.from_file(mask_file, angle_deg=45.0)
+        # Baseline lengths preserved.
+        for bl1, bl2 in zip(mask_0.baselines, mask_45.baselines, strict=True):
+            assert bl2.length == pytest.approx(bl1.length, rel=1e-10)
+        # Coordinates differ.
+        assert mask_45.holes[0].x != pytest.approx(mask_0.holes[0].x, abs=0.01)
+
+    def test_from_bundled_angle_consistent(self):
+        """from_bundled angle gives consistent result."""
+        mask_bundled = NRMMask.from_bundled("lbti_nrm6_sx", angle_deg=12.5)
+        mask_plain = NRMMask.from_bundled("lbti_nrm6_sx")
+        # Baseline lengths must match.
+        for bl1, bl2 in zip(
+            mask_plain.baselines,
+            mask_bundled.baselines,
+            strict=True,
+        ):
+            assert bl2.length == pytest.approx(bl1.length, rel=1e-10)
+        # But coordinates must differ.
+        assert mask_bundled.holes[0].x != pytest.approx(
+            mask_plain.holes[0].x, abs=0.001
+        )
+
+    def test_splodge_distances_preserved(self):
+        """Splodge distances from center invariant."""
+        wavelengths = np.array([3.5])
+        mask_plain = NRMMask.from_bundled("lbti_nrm6_sx")
+        mask_rot = NRMMask.from_bundled("lbti_nrm6_sx", angle_deg=10.0)
+        pos_plain = mask_plain.compute_splodge_positions(
+            wavelengths, ny=501, nx=501
+        )
+        pos_rot = mask_rot.compute_splodge_positions(
+            wavelengths, ny=501, nx=501
+        )
+        center_y = 250.0
+        center_x = 250.0
+        for bl_name in pos_plain:
+            d_plain = np.sqrt(
+                (pos_plain[bl_name][0, 0] - center_y) ** 2
+                + (pos_plain[bl_name][0, 1] - center_x) ** 2
+            )
+            d_rot = np.sqrt(
+                (pos_rot[bl_name][0, 0] - center_y) ** 2
+                + (pos_rot[bl_name][0, 1] - center_x) ** 2
+            )
+            assert d_rot == pytest.approx(d_plain, rel=1e-6)
+
+    def test_power_spectrum_changes_with_rotation(self):
+        """Power spectrum peak positions shift."""
+        wavelength = 3.5
+        mask_plain = NRMMask.from_bundled("lbti_nrm6_sx")
+        mask_rot = NRMMask.from_bundled("lbti_nrm6_sx", angle_deg=15.0)
+        ps_plain = mask_plain.compute_synthetic_power_spectrum(
+            wavelength,
+            n_pixels_image=67,
+            n_pixels_pupil=501,
+        )
+        ps_rot = mask_rot.compute_synthetic_power_spectrum(
+            wavelength,
+            n_pixels_image=67,
+            n_pixels_pupil=501,
+        )
+        # Power spectra should differ.
+        assert not np.allclose(ps_plain, ps_rot)
+        # But total power approximately equal.
+        assert np.sum(ps_rot) == pytest.approx(np.sum(ps_plain), rel=0.01)
+
+
 class TestMakePupilImage:
     """Tests for pupil image generation."""
 

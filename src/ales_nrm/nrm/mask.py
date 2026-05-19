@@ -14,7 +14,7 @@ from pathlib import Path
 
 import numpy as np
 
-from ales_nrm.utilities import ensure_odd
+from ales_nrm.utilities import ensure_odd, rotate_points_2d
 
 logger = logging.getLogger(__name__)
 
@@ -100,6 +100,7 @@ class NRMMask:
         cls,
         filepath: str | Path,
         primary_diameter: float = 8.4,
+        angle_deg: float = 0.0,
     ) -> "NRMMask":
         """Load a mask from a coordinate file.
 
@@ -111,6 +112,11 @@ class NRMMask:
             filepath: Path to the mask coordinate file.
             primary_diameter: Primary mirror diameter in
                 meters. Default is 8.4 m (LBT).
+            angle_deg: Rotation angle in degrees
+                (counter-clockwise). Applied to hole
+                coordinates about their centroid before
+                constructing the mask. Default is 0.0
+                (no rotation).
 
         Returns:
             NRMMask instance with holes and baselines.
@@ -140,6 +146,21 @@ class NRMMask:
                 radius = float(parts[3])
                 holes.append(Hole(name, x, y, radius))
 
+        if angle_deg != 0.0:
+            coords = np.array([[h.x, h.y] for h in holes])
+            center_x = float(np.mean(coords[:, 0]))
+            center_y = float(np.mean(coords[:, 1]))
+            rotated = rotate_points_2d(coords, (center_x, center_y), angle_deg)
+            holes = [
+                Hole(
+                    name=h.name,
+                    x=float(rotated[i, 0]),
+                    y=float(rotated[i, 1]),
+                    radius=h.radius,
+                )
+                for i, h in enumerate(holes)
+            ]
+
         mask = cls(
             holes=holes,
             primary_diameter=primary_diameter,
@@ -147,10 +168,12 @@ class NRMMask:
         mask._compute_baselines()
 
         logger.info(
-            "Loaded mask with %d holes and %d baselines from %s.",
+            "Loaded mask with %d holes and %d baselines "
+            "from %s (angle=%.4f deg).",
             mask.n_holes,
             mask.n_baselines,
             filepath.name,
+            angle_deg,
         )
         return mask
 
@@ -159,6 +182,7 @@ class NRMMask:
         cls,
         name: str = "lbti_nrm6_sx",
         primary_diameter: float = 8.4,
+        angle_deg: float = 0.0,
     ) -> "NRMMask":
         """Load a bundled mask file by name.
 
@@ -167,6 +191,12 @@ class NRMMask:
                 ``'lbti_nrm6_sx'``,
                 ``'lbti_nrm6_dx'``.
             primary_diameter: Primary mirror diameter.
+            angle_deg: Rotation angle in degrees (counter-clockwise
+                in the pupil plane). Applied to hole coordinates
+                about their centroid before constructing the mask.
+                Typically obtained from
+                ``find_mask_rotation_angle()["angle_deg"]``.
+                Default is 0.0.
 
         Returns:
             NRMMask instance.
@@ -175,7 +205,7 @@ class NRMMask:
         mask_file = masks_pkg / f"{name}.txt"
 
         with resources.as_file(mask_file) as path:
-            return cls.from_file(path, primary_diameter)
+            return cls.from_file(path, primary_diameter, angle_deg)
 
     def _compute_baselines(self) -> None:
         """Compute all unique baselines from hole pairs."""
