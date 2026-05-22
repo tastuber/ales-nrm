@@ -20,6 +20,47 @@ from ales_nrm.io.read_fits import read_cubes
 
 logger = logging.getLogger(__name__)
 
+_PARA_KEY = "LBT_PARA"
+_ALT_KEY = "LBT_ALT"
+_TIME_KEY = "TIME-OBS"
+
+
+def _mean_timestamp(timestamps: np.ndarray) -> str:
+    """Compute arithmetic mean of TIME-OBS timestamp strings.
+
+    Args:
+        timestamps: 1D object array of ``'HH:MM:SS.sss'``
+            strings. Empty strings are treated as missing and
+            excluded from the mean.
+
+    Returns:
+        Mean timestamp as ``'HH:MM:SS.sss'`` string, or
+        empty string if no valid timestamps are present.
+    """
+    total = 0.0
+    count = 0
+    for ts in timestamps:
+        if not ts:
+            continue
+        parts = ts.split(":")
+        try:
+            seconds = (
+                float(parts[0]) * 3600.0
+                + float(parts[1]) * 60.0
+                + float(parts[2])
+            )
+        except (ValueError, IndexError):
+            continue
+        total += seconds
+        count += 1
+    if count == 0:
+        return ""
+    mean_sec = total / count
+    h = int(mean_sec // 3600)
+    m = int((mean_sec % 3600) // 60)
+    s = mean_sec % 60
+    return f"{h:02d}:{m:02d}:{s:06.3f}"
+
 
 class BlockType(enum.Enum):
     """Classification of an observing block.
@@ -85,6 +126,24 @@ class ObservingBlock:
             frequency at center. ``None`` before
             ``compute_complex_visibilities(compute_power=True)`` or
             ``compute_power_spectra()`` are called.
+        parallactic_angles: 1D numpy array of parallactic angles
+            in degrees, one per frame (or per stacked cube after
+            stacking). Extracted from the ``LBT_PARA`` FITS
+            header keyword. ``None`` before ``load()`` is called.
+            After stacking, contains the arithmetic mean
+            parallactic angle of each stacking group.
+        altitudes: 1D numpy array of telescope altitudes in
+            degrees, one per frame (or per stacked cube after
+            stacking). Extracted from the ``LBT_ALT`` FITS header
+            keyword. ``None`` before ``load()`` is called. After
+            stacking, contains the arithmetic mean altitude of
+            each stacking group.
+        timestamps: 1D numpy object array of UT time strings, one
+            per frame (or per stacked cube after stacking).
+            Extracted from the ``TIME-OBS`` FITS header keyword.
+            ``None`` before ``load()`` is called. After stacking,
+            contains the first timestamp of each stacking group
+            as a representative identifier.
     """
 
     block_type: BlockType
@@ -119,6 +178,18 @@ class ObservingBlock:
         repr=False,
     )
     power_spectra: np.ndarray | None = field(
+        default=None,
+        repr=False,
+    )
+    parallactic_angles: np.ndarray | None = field(
+        default=None,
+        repr=False,
+    )
+    altitudes: np.ndarray | None = field(
+        default=None,
+        repr=False,
+    )
+    timestamps: np.ndarray | None = field(
         default=None,
         repr=False,
     )
@@ -188,6 +259,90 @@ class ObservingBlock:
                 stacklevel=3,
             )
 
+    def _extract_header_metadata(self) -> None:
+        """Extract metadata from FITS headers.
+
+        Reads ``LBT_PARA``, ``LBT_ALT``, and ``TIME-OBS`` from each
+        header. Issues a warning and stores NaN (for numeric keywords)
+        or an empty string (for ``TIME-OBS``) if a keyword is missing or
+        cannot be converted.
+        """
+        n = len(self.headers)
+        angles = np.empty(n, dtype=np.float64)
+        alts = np.empty(n, dtype=np.float64)
+        times = np.empty(n, dtype=object)
+
+        for i, header in enumerate(self.headers):
+            # Parallactic angle.
+            if _PARA_KEY not in header:
+                warnings.warn(
+                    f"Block '{self.target}' "
+                    f"({self.block_type.value}): "
+                    f"file {self.file_numbers[i]} missing "
+                    f"'{_PARA_KEY}' keyword. "
+                    f"Setting parallactic angle to NaN.",
+                    stacklevel=2,
+                )
+                angles[i] = np.nan
+            else:
+                try:
+                    angles[i] = float(header[_PARA_KEY])
+                except (ValueError, TypeError):
+                    warnings.warn(
+                        f"Block '{self.target}' "
+                        f"({self.block_type.value}): "
+                        f"file {self.file_numbers[i]} has "
+                        f"invalid '{_PARA_KEY}' value "
+                        f"'{header[_PARA_KEY]}'. "
+                        f"Setting parallactic angle to NaN.",
+                        stacklevel=2,
+                    )
+                    angles[i] = np.nan
+
+            # Altitude.
+            if _ALT_KEY not in header:
+                warnings.warn(
+                    f"Block '{self.target}' "
+                    f"({self.block_type.value}): "
+                    f"file {self.file_numbers[i]} missing "
+                    f"'{_ALT_KEY}' keyword. "
+                    f"Setting altitude to NaN.",
+                    stacklevel=2,
+                )
+                alts[i] = np.nan
+            else:
+                try:
+                    alts[i] = float(header[_ALT_KEY])
+                except (ValueError, TypeError):
+                    warnings.warn(
+                        f"Block '{self.target}' "
+                        f"({self.block_type.value}): "
+                        f"file {self.file_numbers[i]} has "
+                        f"invalid '{_ALT_KEY}' value "
+                        f"'{header[_ALT_KEY]}'. "
+                        f"Setting altitude to NaN.",
+                        stacklevel=2,
+                    )
+                    alts[i] = np.nan
+
+            # Timestamp.
+            if _TIME_KEY not in header:
+                warnings.warn(
+                    f"Block '{self.target}' "
+                    f"({self.block_type.value}): "
+                    f"file {self.file_numbers[i]} missing "
+                    f"'{_TIME_KEY}' keyword. "
+                    f"Setting timestamp to empty string.",
+                    stacklevel=2,
+                )
+                times[i] = ""
+            else:
+                times[i] = str(header[_TIME_KEY])
+
+        self.parallactic_angles = angles
+        self.altitudes = alts
+        self.timestamps = times
+
     def load(self) -> None:
         """Load FITS cubes from disk into this block.
 
@@ -233,6 +388,7 @@ class ObservingBlock:
         )
 
         self._validate_loaded_files()
+        self._extract_header_metadata()
 
         logger.info(
             "Loaded %s block '%s': %d cubes, shape=%s.",
@@ -460,6 +616,9 @@ class ObservingBlock:
         new_file_numbers = np.empty(n_groups, dtype=int)
         new_headers = []
         stacking_groups = []
+        new_parallactic_angles = np.empty(n_groups, dtype=np.float64)
+        new_altitudes = np.empty(n_groups, dtype=np.float64)
+        new_timestamps = np.empty(n_groups, dtype=object)
 
         for g, group_fnums in enumerate(resolved_groups):
             indices = np.array([fnum_to_idx[int(fn)] for fn in group_fnums])
@@ -470,6 +629,11 @@ class ObservingBlock:
             new_file_numbers[g] = group_fnums[0]
             new_headers.append(self.headers[indices[0]])
             stacking_groups.append(group_fnums.copy())
+            new_parallactic_angles[g] = np.mean(
+                self.parallactic_angles[indices]
+            )
+            new_altitudes[g] = np.mean(self.altitudes[indices])
+            new_timestamps[g] = _mean_timestamp(self.timestamps[indices])
 
         n_original = self.cubes.shape[0]
         self.cubes = stacked
@@ -478,6 +642,9 @@ class ObservingBlock:
         self.is_stacked = True
         self.stacking_groups = stacking_groups
         self.stacking_method = method
+        self.parallactic_angles = new_parallactic_angles
+        self.altitudes = new_altitudes
+        self.timestamps = new_timestamps
 
         logger.info(
             "Stacked %s block '%s': %d frames -> "
