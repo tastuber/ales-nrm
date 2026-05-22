@@ -573,7 +573,7 @@ class TestComputeSyntheticPowerSpectrum:
         # For odd N, flipping reverses around the center pixel
         # with no roll needed.
         flipped = ps[::-1, ::-1]
-        np.testing.assert_allclose(ps, flipped, rtol=1e-6)
+        np.testing.assert_allclose(ps, flipped, rtol=1e-6, atol=1e-20)
 
 
 class TestComputeSplodgePositions:
