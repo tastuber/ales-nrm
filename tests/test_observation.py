@@ -16,12 +16,26 @@ from tests.conftest import write_test_cube
 @pytest.fixture()
 def sample_directory(tmp_path, sample_cube, sample_wavelengths):
     """Create a directory with synthetic FITS cubes."""
-    for num in range(5001, 5006):
+    para_angles = [10.0, 20.0, 30.0, 40.0, 50.0]
+    altitudes = [55.0, 60.0, 65.0, 70.0, 75.0]
+    times = [
+        "08:00:00.000",
+        "08:01:00.000",
+        "08:02:00.000",
+        "08:03:00.000",
+        "08:04:00.000",
+    ]
+    for i, num in enumerate(range(5001, 5006)):
         filepath = tmp_path / f"cube_lm_251108_{num:06d}.fits"
         write_test_cube(
             filepath,
             sample_cube,
             sample_wavelengths,
+            extra_header={
+                "LBT_PARA": para_angles[i],
+                "LBT_ALT": altitudes[i],
+                "TIME-OBS": times[i],
+            },
         )
     return tmp_path
 
@@ -735,6 +749,298 @@ class TestStackFrames:
             block.stacking_groups[1],
             [5003, 5004],
         )
+
+
+class TestHeaderMetadata:
+    """Tests for header metadata extraction and stacking."""
+
+    def test_metadata_extracted_on_load(self, sci_block):
+        """Parallactic angles, altitudes, timestamps extracted."""
+        sci_block.load()
+        np.testing.assert_allclose(
+            sci_block.parallactic_angles,
+            [10.0, 20.0, 30.0],
+        )
+        np.testing.assert_allclose(
+            sci_block.altitudes,
+            [55.0, 60.0, 65.0],
+        )
+        assert list(sci_block.timestamps) == [
+            "08:00:00.000",
+            "08:01:00.000",
+            "08:02:00.000",
+        ]
+
+    def test_metadata_mean_after_stacking(self, sample_directory):
+        """Mean angles/altitudes and mean timestamp after stacking."""
+        block = ObservingBlock(
+            "SCI",
+            "test target",
+            sample_directory,
+            file_range=(5001, 5004),
+        )
+        block.load()
+        block.stack_frames(group_size=2)
+        np.testing.assert_allclose(block.parallactic_angles, [15.0, 35.0])
+        np.testing.assert_allclose(block.altitudes, [57.5, 67.5])
+        assert block.timestamps[0] == "08:00:30.000"
+        assert block.timestamps[1] == "08:02:30.000"
+
+    def test_metadata_explicit_groups(self, sample_directory):
+        """Mean metadata for explicit stacking groups."""
+        block = ObservingBlock(
+            "SCI",
+            "test target",
+            sample_directory,
+            file_range=(5001, 5005),
+        )
+        block.load()
+        block.stack_frames(
+            groups=[[5001, 5002, 5003], [5004, 5005]],
+        )
+        np.testing.assert_allclose(block.parallactic_angles, [20.0, 45.0])
+        np.testing.assert_allclose(block.altitudes, [60.0, 72.5])
+        assert block.timestamps[0] == "08:01:00.000"
+        assert block.timestamps[1] == "08:03:30.000"
+
+    def test_metadata_group_size_one(self, sci_block):
+        """Stacking with group_size=1 preserves metadata."""
+        sci_block.load()
+        expected_para = sci_block.parallactic_angles.copy()
+        expected_alt = sci_block.altitudes.copy()
+        expected_ts = list(sci_block.timestamps)
+        sci_block.stack_frames(group_size=1)
+        np.testing.assert_allclose(sci_block.parallactic_angles, expected_para)
+        np.testing.assert_allclose(sci_block.altitudes, expected_alt)
+        assert list(sci_block.timestamps) == expected_ts
+
+    def test_missing_para_warns_and_stores_nan(
+        self,
+        tmp_path,
+        sample_cube,
+        sample_wavelengths,
+    ):
+        """Warn and use NaN when LBT_PARA is missing."""
+        filepath = tmp_path / "cube_lm_251108_006001.fits"
+        write_test_cube(filepath, sample_cube, sample_wavelengths)
+        from astropy.io import fits
+
+        with fits.open(filepath, mode="update") as hdul:
+            del hdul[0].header["LBT_PARA"]
+            hdul.flush()
+
+        block = ObservingBlock(
+            "SCI", "test", tmp_path, file_range=(6001, 6001)
+        )
+        with pytest.warns(UserWarning, match="missing.*LBT_PARA"):
+            block.load()
+        assert np.isnan(block.parallactic_angles[0])
+
+    def test_missing_alt_warns_and_stores_nan(
+        self,
+        tmp_path,
+        sample_cube,
+        sample_wavelengths,
+    ):
+        """Warn and use NaN when LBT_ALT is missing."""
+        filepath = tmp_path / "cube_lm_251108_006001.fits"
+        write_test_cube(filepath, sample_cube, sample_wavelengths)
+        from astropy.io import fits
+
+        with fits.open(filepath, mode="update") as hdul:
+            del hdul[0].header["LBT_ALT"]
+            hdul.flush()
+
+        block = ObservingBlock(
+            "SCI", "test", tmp_path, file_range=(6001, 6001)
+        )
+        with pytest.warns(UserWarning, match="missing.*LBT_ALT"):
+            block.load()
+        assert np.isnan(block.altitudes[0])
+
+    def test_missing_time_warns_and_stores_empty(
+        self,
+        tmp_path,
+        sample_cube,
+        sample_wavelengths,
+    ):
+        """Warn and use empty string when TIME-OBS missing."""
+        filepath = tmp_path / "cube_lm_251108_006001.fits"
+        write_test_cube(filepath, sample_cube, sample_wavelengths)
+        from astropy.io import fits
+
+        with fits.open(filepath, mode="update") as hdul:
+            del hdul[0].header["TIME-OBS"]
+            hdul.flush()
+
+        block = ObservingBlock(
+            "SCI", "test", tmp_path, file_range=(6001, 6001)
+        )
+        with pytest.warns(UserWarning, match="missing.*TIME-OBS"):
+            block.load()
+        assert block.timestamps[0] == ""
+
+    def test_invalid_para_warns_and_stores_nan(
+        self,
+        tmp_path,
+        sample_cube,
+        sample_wavelengths,
+    ):
+        """Warn and use NaN when LBT_PARA is non-numeric."""
+        filepath = tmp_path / "cube_lm_251108_006001.fits"
+        write_test_cube(
+            filepath,
+            sample_cube,
+            sample_wavelengths,
+            extra_header={"LBT_PARA": "NOT_A_NUMBER"},
+        )
+        block = ObservingBlock(
+            "SCI", "test", tmp_path, file_range=(6001, 6001)
+        )
+        with pytest.warns(UserWarning, match="invalid.*LBT_PARA"):
+            block.load()
+        assert np.isnan(block.parallactic_angles[0])
+
+    def test_invalid_alt_warns_and_stores_nan(
+        self,
+        tmp_path,
+        sample_cube,
+        sample_wavelengths,
+    ):
+        """Warn and use NaN when LBT_ALT is non-numeric."""
+        filepath = tmp_path / "cube_lm_251108_006001.fits"
+        write_test_cube(
+            filepath,
+            sample_cube,
+            sample_wavelengths,
+            extra_header={"LBT_ALT": "BAD"},
+        )
+        block = ObservingBlock(
+            "SCI", "test", tmp_path, file_range=(6001, 6001)
+        )
+        with pytest.warns(UserWarning, match="invalid.*LBT_ALT"):
+            block.load()
+        assert np.isnan(block.altitudes[0])
+
+    def test_nan_propagates_through_stacking(
+        self,
+        tmp_path,
+        sample_cube,
+        sample_wavelengths,
+    ):
+        """NaN in angles/altitudes propagates through mean."""
+        for num in [7001, 7002]:
+            filepath = tmp_path / f"cube_lm_251108_{num:06d}.fits"
+            write_test_cube(
+                filepath,
+                sample_cube,
+                sample_wavelengths,
+                extra_header={
+                    "LBT_PARA": 25.0,
+                    "LBT_ALT": 70.0,
+                },
+            )
+        from astropy.io import fits
+
+        fp2 = tmp_path / "cube_lm_251108_007002.fits"
+        with fits.open(fp2, mode="update") as hdul:
+            del hdul[0].header["LBT_PARA"]
+            del hdul[0].header["LBT_ALT"]
+            hdul.flush()
+
+        block = ObservingBlock(
+            "SCI", "test", tmp_path, file_range=(7001, 7002)
+        )
+        with pytest.warns(UserWarning):
+            block.load()
+        block.stack_frames(group_size=2)
+        assert np.isnan(block.parallactic_angles[0])
+        assert np.isnan(block.altitudes[0])
+
+    def test_mean_timestamp_excludes_empty(
+        self,
+        tmp_path,
+        sample_cube,
+        sample_wavelengths,
+    ):
+        """Empty timestamps excluded from mean computation."""
+        for num in [7001, 7002]:
+            filepath = tmp_path / f"cube_lm_251108_{num:06d}.fits"
+            write_test_cube(
+                filepath,
+                sample_cube,
+                sample_wavelengths,
+                extra_header={"TIME-OBS": "10:00:00.000"},
+            )
+        from astropy.io import fits
+
+        fp2 = tmp_path / "cube_lm_251108_007002.fits"
+        with fits.open(fp2, mode="update") as hdul:
+            del hdul[0].header["TIME-OBS"]
+            hdul.flush()
+
+        block = ObservingBlock(
+            "SCI", "test", tmp_path, file_range=(7001, 7002)
+        )
+        with pytest.warns(UserWarning, match="missing.*TIME-OBS"):
+            block.load()
+        block.stack_frames(group_size=2)
+        assert block.timestamps[0] == "10:00:00.000"
+
+    def test_mean_timestamp_all_empty_yields_empty(
+        self,
+        tmp_path,
+        sample_cube,
+        sample_wavelengths,
+    ):
+        """All-empty timestamps yield empty string."""
+        for num in [7001, 7002]:
+            filepath = tmp_path / f"cube_lm_251108_{num:06d}.fits"
+            write_test_cube(
+                filepath,
+                sample_cube,
+                sample_wavelengths,
+            )
+        from astropy.io import fits
+
+        for num in [7001, 7002]:
+            fp = tmp_path / f"cube_lm_251108_{num:06d}.fits"
+            with fits.open(fp, mode="update") as hdul:
+                del hdul[0].header["TIME-OBS"]
+                hdul.flush()
+
+        block = ObservingBlock(
+            "SCI", "test", tmp_path, file_range=(7001, 7002)
+        )
+        with pytest.warns(UserWarning, match="missing.*TIME-OBS"):
+            block.load()
+        block.stack_frames(group_size=2)
+        assert block.timestamps[0] == ""
+
+    def test_mean_timestamp_malformed_excluded(
+        self,
+        tmp_path,
+        sample_cube,
+        sample_wavelengths,
+    ):
+        """Malformed timestamps excluded from mean."""
+        for i, num in enumerate([7001, 7002]):
+            filepath = tmp_path / f"cube_lm_251108_{num:06d}.fits"
+            ts = "10:00:00.000" if i == 0 else "BADTIME"
+            write_test_cube(
+                filepath,
+                sample_cube,
+                sample_wavelengths,
+                extra_header={"TIME-OBS": ts},
+            )
+
+        block = ObservingBlock(
+            "SCI", "test", tmp_path, file_range=(7001, 7002)
+        )
+        block.load()
+        block.stack_frames(group_size=2)
+        # "BADTIME" fails parsing, only "10:00:00.000" contributes.
+        assert block.timestamps[0] == "10:00:00.000"
 
 
 class TestComplexVisibilities:
