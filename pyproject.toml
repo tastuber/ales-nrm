@@ -39,6 +39,11 @@ dependencies = [
     "matplotlib>=3.7",
 ]
 
+[project.optional-dependencies]
+sampy = [
+    "sampy-ami @ git+https://github.com/tastuber/SAMpy.git@bc3b076c178752e08420a1cd1cd9782d00c71042",
+]
+
 [dependency-groups]
 test = [
     "pytest>=7.0",
@@ -81,6 +86,7 @@ addopts = [
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "requires_data: marks tests that need FITS data files",
+    "sampy: marks tests requiring SAMpy (deselect with '-m \"not sampy\"')",
 ]
 
 [tool.ruff]
