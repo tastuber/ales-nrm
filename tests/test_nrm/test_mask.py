@@ -195,6 +195,46 @@ class TestNRMMaskFromFile:
         mask = NRMMask.from_file(mask_file, primary_diameter=6.5)
         assert mask.primary_diameter == 6.5
 
+    def test_source_name_from_file(self, tmp_path):
+        """source_name is set to file stem."""
+        mask_file = tmp_path / "my_custom_mask.txt"
+        mask_file.write_text("H1 -1.0 0.0 0.4\nH2 1.0 0.0 0.4\n")
+        mask = NRMMask.from_file(mask_file)
+        assert mask.source_name == "my_custom_mask"
+
+    def test_source_name_from_bundled(self):
+        """source_name matches bundled name."""
+        mask = NRMMask.from_bundled("lbti_nrm6_sx")
+        assert mask.source_name == "lbti_nrm6_sx"
+
+    def test_source_content_from_file(self, tmp_path):
+        """source_content contains file text."""
+        mask_file = tmp_path / "my_mask.txt"
+        content = "H1 -1.0 0.0 0.4\nH2 1.0 0.0 0.4\n"
+        mask_file.write_text(content)
+        mask = NRMMask.from_file(mask_file)
+        assert mask.source_content == content
+
+    def test_source_content_from_bundled(self):
+        """source_content is non-empty for bundled."""
+        mask = NRMMask.from_bundled("lbti_nrm6_sx")
+        assert len(mask.source_content) > 0
+        assert "H1" in mask.source_content
+
+    def test_angle_deg_stored(self, tmp_path):
+        """angle_deg is stored on the mask object."""
+        mask_file = tmp_path / "my_mask.txt"
+        mask_file.write_text("H1 -1.0 0.0 0.4\nH2 1.0 0.0 0.4\n")
+        mask = NRMMask.from_file(mask_file, angle_deg=12.5)
+        assert mask.angle_deg == 12.5
+
+    def test_angle_deg_default_zero(self, tmp_path):
+        """angle_deg defaults to 0."""
+        mask_file = tmp_path / "my_mask.txt"
+        mask_file.write_text("H1 -1.0 0.0 0.4\nH2 1.0 0.0 0.4\n")
+        mask = NRMMask.from_file(mask_file)
+        assert mask.angle_deg == 0.0
+
 
 class TestMaskRotationAtLoad:
     """Tests for angle_deg parameter in factory methods."""
