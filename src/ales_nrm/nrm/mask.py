@@ -71,13 +71,23 @@ class NRMMask:
     Attributes:
         holes: List of Hole objects.
         baselines: List of Baseline objects.
-        primary_diameter: Primary mirror diameter in
-            meters.
+        primary_diameter: Primary mirror diameter in meters.
+        source_name: Stem of the mask file used to create
+            this instance (e.g., ``'lbti_nrm6_sx'``). Set
+            automatically by factory methods.
+        source_content: Raw text content of the mask
+            file used to create this instance. Enables
+            verbatim copy for provenance logging.
+        angle_deg: Rotation angle applied to hole
+            coordinates at load time (degrees, CCW).
     """
 
     primary_diameter: float
     holes: list[Hole] = field(default_factory=list)
     baselines: list[Baseline] = field(default_factory=list)
+    source_name: str = ""
+    source_content: str = ""
+    angle_deg: float = 0.0
 
     @property
     def n_holes(self) -> int:
@@ -166,6 +176,10 @@ class NRMMask:
             primary_diameter=primary_diameter,
         )
         mask._compute_baselines()
+
+        mask.source_name = filepath.stem
+        mask.source_content = filepath.read_text()
+        mask.angle_deg = angle_deg
 
         logger.info(
             "Loaded mask with %d holes and %d baselines "
