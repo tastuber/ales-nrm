@@ -167,6 +167,51 @@ def _compute_zero_spacing_radius(
     return max(1, int(np.round(radius)))
 
 
+def _make_cache_dirname(
+    source_name: str,
+    n_pixels: int,
+    pixel_scale: float,
+    pupil_pixel_scale: float,
+    fourier_cutoff: float,
+) -> str:
+    """Construct a parametrized cache directory name.
+
+    Encodes the key SAMpy coordinate-generation parameters
+    into a deterministic, human-readable directory name.
+    This ensures that different parameter sets produce
+    separate cache directories, avoiding collisions.
+
+    The format is:
+
+        {source_name}_npix{n_pixels}_pixscale{pixel_scale}_pupilpixscale{pupil_pixel_scale}_fouriercutoff{fourier_cutoff}
+
+    Float values are formatted to remove trailing zeros
+    for compactness while preserving uniqueness.
+
+    Args:
+        source_name: Mask source name (e.g., "lbt_nrm").
+        n_pixels: Fourier-plane grid size.
+        pixel_scale: Detector pixel scale in arcsec/pixel.
+        pupil_pixel_scale: Pupil model scale in m/pixel.
+        fourier_cutoff: Fourier-plane selection threshold.
+
+    Returns:
+        Directory name string.
+    """
+
+    def _fmt(value: float) -> str:
+        """Format float compactly, removing trailing zeros."""
+        return f"{value:g}"
+
+    return (
+        f"{source_name}"
+        f"_npix{n_pixels}"
+        f"_pixscale{_fmt(pixel_scale)}"
+        f"_pupilpixscale{_fmt(pupil_pixel_scale)}"
+        f"_fouriercutoff{_fmt(fourier_cutoff)}"
+    )
+
+
 def _write_source_mask(mask: NRMMask, output_path: Path) -> None:
     """Write verbatim copy of original mask file.
 
@@ -222,11 +267,12 @@ def setup_sampy_coords(
     functions.
 
     Results are cached in a subdirectory of ``cache_dir``
-    named after the mask source file. The directory
-    structure is::
+    named after the mask source file and key parameters.
+    The directory structure is::
 
         cache_dir/
-        └── {source_name}/
+        └── {source_name}_npix{n_pixels}_pixscale{pixel_scale}_\
+            pupilpixscale{pupil_pixel_scale}_fouriercutoff{fourier_cutoff}/
             ├── {source_name}.txt
             ├── {source_name}_rotated.txt
             ├── {source_name}_sampy.txt
@@ -308,9 +354,12 @@ def setup_sampy_coords(
     # Convert single wavelength to ndarray
     wavelengths = np.atleast_1d(np.asarray(wavelengths, dtype=float))
 
-    # Mask-specific subdirectory named after source file
+    # Mask-specific subdirectory named after source file and parameters
     source_name = mask.source_name or "unknown_mask"
-    mask_cache = cache_dir / source_name
+    cache_dirname = _make_cache_dirname(
+        source_name, n_pixels, pixel_scale, pupil_pixel_scale, fourier_cutoff
+    )
+    mask_cache = cache_dir / cache_dirname
 
     # force_recompute: clean slate
     if force_recompute and mask_cache.exists():
