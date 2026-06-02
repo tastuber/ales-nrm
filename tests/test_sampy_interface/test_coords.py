@@ -12,6 +12,7 @@ from ales_nrm.sampy_interface.coords import (
     _compute_zero_spacing_radius,
     _convert_mask_to_sampy,
     _generate_narrow_filter,
+    _make_cache_dirname,
     setup_sampy_coords,
 )
 
@@ -252,6 +253,58 @@ class TestComputeZeroSpacingRadius:
         assert r_twice == 2.0 * r
 
 
+class TestMakeCacheDirname:
+    """Tests for _make_cache_dirname."""
+
+    def test_default_ales_parameters(self):
+        """Default ALES parameters produce expected name."""
+        name = _make_cache_dirname(
+            source_name="lbt_nrm",
+            n_pixels=501,
+            pixel_scale=0.0345,
+            pupil_pixel_scale=0.01,
+            fourier_cutoff=0.4,
+        )
+        assert name == (
+            "lbt_nrm_npix501_pixscale0.0345_pupilpixscale0.01_fouriercutoff0.4"
+        )
+
+    def test_different_parameters_different_names(self):
+        """Different parameters produce different names."""
+        name1 = _make_cache_dirname("mask", 501, 0.0345, 0.01, 0.4)
+        name2 = _make_cache_dirname("mask", 1001, 0.0345, 0.01, 0.4)
+        name3 = _make_cache_dirname("mask", 501, 0.05, 0.01, 0.4)
+        name4 = _make_cache_dirname("mask", 501, 0.0345, 0.005, 0.4)
+        name5 = _make_cache_dirname("mask", 501, 0.0345, 0.01, 0.3)
+
+        names = [name1, name2, name3, name4, name5]
+        assert len(set(names)) == 5
+
+    def test_same_parameters_same_name(self):
+        """Identical parameters produce identical names."""
+        name1 = _make_cache_dirname("lbt_nrm", 501, 0.0345, 0.01, 0.4)
+        name2 = _make_cache_dirname("lbt_nrm", 501, 0.0345, 0.01, 0.4)
+        assert name1 == name2
+
+    def test_integer_pixel_scale(self):
+        """Integer-like floats formatted without decimal."""
+        name = _make_cache_dirname("mask", 501, 1.0, 1.0, 1.0)
+        assert name == "mask_npix501_pixscale1_pupilpixscale1_fouriercutoff1"
+
+    def test_source_name_preserved(self):
+        """Source name appears at the start."""
+        name = _make_cache_dirname("my_mask", 501, 0.0345, 0.01, 0.4)
+        assert name.startswith("my_mask_")
+
+    def test_valid_directory_name(self):
+        """Output is a valid directory name (no slashes, etc.)."""
+        name = _make_cache_dirname("lbt_nrm", 501, 0.0345, 0.01, 0.4)
+        # Should not contain path separators or problematic chars
+        assert "/" not in name
+        assert "\\" not in name
+        assert " " not in name
+
+
 class TestSetupSampyCoords:
     """Tests for setup_sampy_coords (mocked SAMpy)."""
 
@@ -412,8 +465,15 @@ class TestSetupSampyCoords:
         mock_make_coords = MagicMock()
         mock_sampy, mock_module = _make_sampy_mocks(mock_make_coords)
 
-        # Pre-create mask file and coord dirs
-        mask_cache = cache / ales_mask.source_name
+        # Pre-create mask file and coord dirs using parametrized name
+        cache_dirname = _make_cache_dirname(
+            ales_mask.source_name,
+            501,
+            ALES_PIXEL_SCALE_ARCSEC,
+            0.01,
+            0.4,
+        )
+        mask_cache = cache / cache_dirname
         mask_file = mask_cache / f"{ales_mask.source_name}_sampy.txt"
         mask_file.parent.mkdir(parents=True)
         mask_file.write_text("dummy")
@@ -447,7 +507,14 @@ class TestSetupSampyCoords:
         mock_sampy, mock_module = _make_sampy_mocks(mock_make_coords)
 
         # Pre-create mask file and one wavelength
-        mask_cache = cache / ales_mask.source_name
+        cache_dirname = _make_cache_dirname(
+            ales_mask.source_name,
+            501,
+            ALES_PIXEL_SCALE_ARCSEC,
+            0.01,
+            0.4,
+        )
+        mask_cache = cache / cache_dirname
         mask_file = mask_cache / f"{ales_mask.source_name}_sampy.txt"
         mask_file.parent.mkdir(parents=True)
         mask_file.write_text("dummy")
@@ -480,8 +547,15 @@ class TestSetupSampyCoords:
         mock_make_coords = MagicMock()
         mock_sampy, mock_module = _make_sampy_mocks(mock_make_coords)
 
-        # Pre-create stale artifact
-        mask_cache = cache / ales_mask.source_name
+        # Pre-create stale artifact using parametrized name
+        cache_dirname = _make_cache_dirname(
+            ales_mask.source_name,
+            501,
+            ALES_PIXEL_SCALE_ARCSEC,
+            0.01,
+            0.4,
+        )
+        mask_cache = cache / cache_dirname
         stale = mask_cache / "stale_artifact.txt"
         stale.parent.mkdir(parents=True)
         stale.write_text("should be deleted")
@@ -554,7 +628,7 @@ class TestSetupSampyCoords:
     def test_directory_structure(
         self, ales_mask, sample_wavelengths_short, tmp_path
     ):
-        """Cache uses mask-named subdirectory structure."""
+        """Cache uses parametrized subdirectory structure."""
         cache = tmp_path / "cache"
         mock_make_coords = MagicMock()
         mock_sampy, mock_module = _make_sampy_mocks(mock_make_coords)
@@ -573,7 +647,14 @@ class TestSetupSampyCoords:
                 force_recompute=True,
             )
 
-        mask_cache = cache / ales_mask.source_name
+        cache_dirname = _make_cache_dirname(
+            ales_mask.source_name,
+            501,
+            ALES_PIXEL_SCALE_ARCSEC,
+            0.01,
+            0.4,
+        )
+        mask_cache = cache / cache_dirname
 
         sampy_mask = mask_cache / f"{ales_mask.source_name}_sampy.txt"
         assert sampy_mask.exists()
@@ -617,10 +698,15 @@ class TestSetupSampyCoords:
                 force_recompute=True,
             )
 
+        cache_dirname = _make_cache_dirname(
+            ales_mask.source_name,
+            501,
+            ALES_PIXEL_SCALE_ARCSEC,
+            0.01,
+            0.4,
+        )
         rotated = (
-            cache
-            / ales_mask.source_name
-            / f"{ales_mask.source_name}_rotated.txt"
+            cache / cache_dirname / f"{ales_mask.source_name}_rotated.txt"
         )
         content = rotated.read_text()
         assert "Rotation:" in content
@@ -646,9 +732,14 @@ class TestSetupSampyCoords:
                 force_recompute=True,
             )
 
-        source_copy = (
-            cache / ales_mask.source_name / f"{ales_mask.source_name}.txt"
+        cache_dirname = _make_cache_dirname(
+            ales_mask.source_name,
+            501,
+            ALES_PIXEL_SCALE_ARCSEC,
+            0.01,
+            0.4,
         )
+        source_copy = cache / cache_dirname / f"{ales_mask.source_name}.txt"
         assert source_copy.read_text() == ales_mask.source_content
 
     def test_import_error_message(
@@ -759,6 +850,72 @@ class TestSetupSampyCoords:
 
         assert mock_make_coords.call_count == 1
         assert 3.5 in result
+
+    def test_different_params_different_cache_dirs(self, ales_mask, tmp_path):
+        """Different parameters use separate cache directories."""
+        cache = tmp_path / "cache"
+        mock_make_coords = MagicMock()
+        mock_sampy, mock_module = _make_sampy_mocks(mock_make_coords)
+
+        with patch.dict(
+            sys.modules,
+            {
+                "sampy": mock_sampy,
+                "sampy.mask": mock_module,
+            },
+        ):
+            result1 = setup_sampy_coords(
+                ales_mask,
+                np.array([3.5]),
+                cache,
+                n_pixels=501,
+                force_recompute=True,
+            )
+            result2 = setup_sampy_coords(
+                ales_mask,
+                np.array([3.5]),
+                cache,
+                n_pixels=1001,
+                force_recompute=True,
+            )
+
+        # The paths should be in different parent directories
+        path1 = result1[3.5]
+        path2 = result2[3.5]
+        assert path1 != path2
+        assert path1.parent.parent != path2.parent.parent
+
+    def test_same_params_same_cache_dir(self, ales_mask, tmp_path):
+        """Same parameters reuse the same cache directory."""
+        cache = tmp_path / "cache"
+        mock_make_coords = MagicMock()
+        mock_sampy, mock_module = _make_sampy_mocks(mock_make_coords)
+
+        with patch.dict(
+            sys.modules,
+            {
+                "sampy": mock_sampy,
+                "sampy.mask": mock_module,
+            },
+        ):
+            result1 = setup_sampy_coords(
+                ales_mask,
+                np.array([3.5]),
+                cache,
+                force_recompute=True,
+            )
+            # Second call without force_recompute should find cache
+            result2 = setup_sampy_coords(
+                ales_mask,
+                np.array([3.5]),
+                cache,
+                force_recompute=False,
+            )
+
+        # Same path returned
+        assert result1[3.5] == result2[3.5]
+        # Only called once (second call found existing dir)
+        assert mock_make_coords.call_count == 1
 
 
 @pytest.mark.sampy
