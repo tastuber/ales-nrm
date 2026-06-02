@@ -26,7 +26,13 @@ def ales_mask():
 @pytest.fixture()
 def sample_wavelengths_short():
     """A small wavelength array for fast tests."""
-    return np.array([3.0, 3.5, 4.0])
+    return np.array([2.7, 4.3])
+
+
+@pytest.fixture()
+def single_wavelength():
+    """A single wavelength for tests requiring one channel."""
+    return 3.5
 
 
 def _make_sampy_mocks(mock_make_coords):
@@ -329,8 +335,8 @@ class TestSetupSampyCoords:
                 force_recompute=True,
             )
 
-        assert mock_make_coords.call_count == 3
-        assert len(result) == 3
+        assert mock_make_coords.call_count == len(sample_wavelengths_short)
+        assert len(result) == len(sample_wavelengths_short)
 
     def test_correct_default_arguments_passed(
         self, ales_mask, sample_wavelengths_short, tmp_path
@@ -367,9 +373,10 @@ class TestSetupSampyCoords:
         expected_diam = 2.0 * ales_mask.holes[0].radius
         assert kw["subaperture_diameter"] == pytest.approx(expected_diam)
 
-    def test_custom_arguments_passed(self, ales_mask, tmp_path):
+    def test_custom_arguments_passed(
+        self, ales_mask, single_wavelength, tmp_path
+    ):
         """Custom parameters are forwarded correctly."""
-        wls = np.array([3.5])
         mock_make_coords = MagicMock()
         mock_sampy, mock_module = _make_sampy_mocks(mock_make_coords)
 
@@ -382,7 +389,7 @@ class TestSetupSampyCoords:
         ):
             setup_sampy_coords(
                 ales_mask,
-                wls,
+                single_wavelength,
                 tmp_path / "cache",
                 pixel_scale=0.05,
                 n_pixels=101,
@@ -400,10 +407,9 @@ class TestSetupSampyCoords:
         assert kw["fourier_cutoff"] == 0.3
 
     def test_auto_zero_spacing_varies_with_wavelength(
-        self, ales_mask, tmp_path
+        self, ales_mask, sample_wavelengths_short, tmp_path
     ):
         """Auto zero_spacing_radius differs per wavelength."""
-        wls = np.array([2.8, 4.2])
         calls_kwargs = []
         mock_make_coords = MagicMock(
             side_effect=lambda **kw: calls_kwargs.append(kw)
@@ -419,7 +425,7 @@ class TestSetupSampyCoords:
         ):
             setup_sampy_coords(
                 ales_mask,
-                wls,
+                sample_wavelengths_short,
                 tmp_path / "cache",
                 zero_spacing_radius=None,
                 force_recompute=True,
@@ -430,9 +436,10 @@ class TestSetupSampyCoords:
         zsr_long = calls_kwargs[1]["zero_spacing_radius"]
         assert zsr_short > zsr_long
 
-    def test_fixed_zero_spacing_same_for_all(self, ales_mask, tmp_path):
+    def test_fixed_zero_spacing_same_for_all(
+        self, ales_mask, sample_wavelengths_short, tmp_path
+    ):
         """Fixed zero_spacing_radius used for all wavelengths."""
-        wls = np.array([2.8, 4.2])
         calls_kwargs = []
         mock_make_coords = MagicMock(
             side_effect=lambda **kw: calls_kwargs.append(kw)
@@ -448,7 +455,7 @@ class TestSetupSampyCoords:
         ):
             setup_sampy_coords(
                 ales_mask,
-                wls,
+                sample_wavelengths_short,
                 tmp_path / "cache",
                 zero_spacing_radius=25,
                 force_recompute=True,
@@ -496,7 +503,7 @@ class TestSetupSampyCoords:
             )
 
         assert mock_make_coords.call_count == 0
-        assert len(result) == 3
+        assert len(result) == len(sample_wavelengths_short)
 
     def test_incremental_wavelength_addition(
         self, ales_mask, sample_wavelengths_short, tmp_path
@@ -518,7 +525,11 @@ class TestSetupSampyCoords:
         mask_file = mask_cache / f"{ales_mask.source_name}_sampy.txt"
         mask_file.parent.mkdir(parents=True)
         mask_file.write_text("dummy")
-        existing = mask_cache / "sampy_coords" / "3.0000um"
+        existing = (
+            mask_cache
+            / "sampy_coords"
+            / f"{sample_wavelengths_short[0]:.4f}um"
+        )
         existing.mkdir(parents=True)
 
         with patch.dict(
@@ -535,9 +546,9 @@ class TestSetupSampyCoords:
                 force_recompute=False,
             )
 
-        # Only 2 new wavelengths computed
-        assert mock_make_coords.call_count == 2
-        assert len(result) == 3
+        # One wavelength was precomputed
+        assert mock_make_coords.call_count == len(sample_wavelengths_short) - 1
+        assert len(result) == len(sample_wavelengths_short)
 
     def test_force_recompute_deletes_cache(
         self, ales_mask, sample_wavelengths_short, tmp_path
@@ -829,7 +840,9 @@ class TestSetupSampyCoords:
                 )
                 mock_ioff.assert_not_called()
 
-    def test_single_wavelength_scalar(self, ales_mask, tmp_path):
+    def test_single_wavelength_scalar(
+        self, ales_mask, single_wavelength, tmp_path
+    ):
         """Single float wavelength accepted."""
         mock_make_coords = MagicMock()
         mock_sampy, mock_module = _make_sampy_mocks(mock_make_coords)
@@ -843,15 +856,17 @@ class TestSetupSampyCoords:
         ):
             result = setup_sampy_coords(
                 ales_mask,
-                3.5,
+                single_wavelength,
                 tmp_path / "cache",
                 force_recompute=True,
             )
 
         assert mock_make_coords.call_count == 1
-        assert 3.5 in result
+        assert single_wavelength in result
 
-    def test_different_params_different_cache_dirs(self, ales_mask, tmp_path):
+    def test_different_params_different_cache_dirs(
+        self, ales_mask, single_wavelength, tmp_path
+    ):
         """Different parameters use separate cache directories."""
         cache = tmp_path / "cache"
         mock_make_coords = MagicMock()
@@ -866,26 +881,28 @@ class TestSetupSampyCoords:
         ):
             result1 = setup_sampy_coords(
                 ales_mask,
-                np.array([3.5]),
+                single_wavelength,
                 cache,
                 n_pixels=501,
                 force_recompute=True,
             )
             result2 = setup_sampy_coords(
                 ales_mask,
-                np.array([3.5]),
+                single_wavelength,
                 cache,
                 n_pixels=1001,
                 force_recompute=True,
             )
 
         # The paths should be in different parent directories
-        path1 = result1[3.5]
-        path2 = result2[3.5]
+        path1 = result1[single_wavelength]
+        path2 = result2[single_wavelength]
         assert path1 != path2
         assert path1.parent.parent != path2.parent.parent
 
-    def test_same_params_same_cache_dir(self, ales_mask, tmp_path):
+    def test_same_params_same_cache_dir(
+        self, ales_mask, single_wavelength, tmp_path
+    ):
         """Same parameters reuse the same cache directory."""
         cache = tmp_path / "cache"
         mock_make_coords = MagicMock()
@@ -900,20 +917,20 @@ class TestSetupSampyCoords:
         ):
             result1 = setup_sampy_coords(
                 ales_mask,
-                np.array([3.5]),
+                single_wavelength,
                 cache,
                 force_recompute=True,
             )
             # Second call without force_recompute should find cache
             result2 = setup_sampy_coords(
                 ales_mask,
-                np.array([3.5]),
+                single_wavelength,
                 cache,
                 force_recompute=False,
             )
 
         # Same path returned
-        assert result1[3.5] == result2[3.5]
+        assert result1[single_wavelength] == result2[single_wavelength]
         # Only called once (second call found existing dir)
         assert mock_make_coords.call_count == 1
 
