@@ -7,6 +7,7 @@ and configuration. An ObservingSequence groups multiple blocks into a
 calibration sequence such as CAL-SCI-CAL.
 """
 
+import datetime
 import enum
 import logging
 import warnings
@@ -23,6 +24,42 @@ logger = logging.getLogger(__name__)
 _PARA_KEY = "LBT_PARA"
 _ALT_KEY = "LBT_ALT"
 _TIME_KEY = "TIME-OBS"
+
+
+def _parse_observation_date(
+    value: "datetime.date | str | None",
+) -> "datetime.date | None":
+    """Parse an observation date from various input types.
+
+    Args:
+        value: A ``datetime.date``, an ISO format string
+            (``'YYYY-MM-DD'``), or ``None``.
+
+    Returns:
+        A ``datetime.date`` object, or ``None`` if input is
+        ``None``.
+
+    Raises:
+        TypeError: If value is not a supported type, or if a
+            ``datetime.datetime`` is passed (only pure dates
+            are accepted).
+        ValueError: If string cannot be parsed as ISO date.
+    """
+    if value is None:
+        return None
+    if isinstance(value, datetime.datetime):
+        raise TypeError(
+            "observation_date must be a datetime.date, not "
+            "datetime.datetime. Use value.date() to convert."
+        )
+    if isinstance(value, datetime.date):
+        return value
+    if isinstance(value, str):
+        return datetime.date.fromisoformat(value)
+    raise TypeError(
+        f"observation_date must be a datetime.date, "
+        f"ISO format string, or None; got {type(value).__name__}."
+    )
 
 
 def _mean_timestamp(timestamps: np.ndarray) -> str:
@@ -90,6 +127,11 @@ class ObservingBlock:
             directory are loaded.
         prefix: Filename prefix for FITS file matching. Default is
             ``'cube_lm_'``.
+        observation_date: UT date of the observation as a
+            ``datetime.date``. Accepts a ``datetime.date`` object
+            or an ISO format string (``'YYYY-MM-DD'``) which is
+            automatically converted. Default is ``None`` (not
+            specified).
         cubes: 4D numpy array of shape
             ``(n_files, n_wavelengths, ny, nx)`` after loading. ``None``
             before ``load()`` is called. After stacking, contains the
@@ -151,6 +193,7 @@ class ObservingBlock:
     directory: str | Path
     file_range: tuple[int, int] | None = None
     prefix: str = "cube_lm_"
+    observation_date: datetime.date | None = field(default=None)
     cubes: np.ndarray | None = field(default=None, repr=False)
     wavelengths: np.ndarray | None = field(
         default=None,
@@ -207,6 +250,8 @@ class ObservingBlock:
                 raise ValueError(
                     f"file_range start ({start}) must be <= end ({end})."
                 )
+
+        self.observation_date = _parse_observation_date(self.observation_date)
 
     @property
     def n_files(self) -> int | None:
@@ -666,6 +711,9 @@ class ObservingBlock:
         """
         parts = [f"{self.block_type.value} '{self.target}'"]
 
+        if self.observation_date is not None:
+            parts.append(f"[{self.observation_date.isoformat()}]")
+
         if not self.is_loaded:
             if self.file_range is not None:
                 expected = self.file_range[1] - self.file_range[0] + 1
@@ -902,6 +950,31 @@ class ObservingSequence:
         for block in self.blocks:
             if not block.is_loaded:
                 block.load()
+
+    def set_observation_date(
+        self,
+        date: "datetime.date | str",
+    ) -> None:
+        """Set the observation date for all blocks in the sequence.
+
+        Args:
+            date: The UT observation date as a ``datetime.date``
+                object or an ISO format string (``'YYYY-MM-DD'``).
+
+        Raises:
+            TypeError: If date is not a ``datetime.date`` or
+                string.
+            ValueError: If string cannot be parsed as ISO date.
+        """
+        parsed = _parse_observation_date(date)
+        for block in self.blocks:
+            block.observation_date = parsed
+        logger.info(
+            "Set observation_date=%s for all %d blocks in sequence '%s'.",
+            parsed.isoformat(),
+            len(self.blocks),
+            self.name,
+        )
 
     def get_blocks_by_target(
         self,

@@ -1,5 +1,6 @@
 """Tests for observing block and observation sequence management."""
 
+import datetime
 import warnings
 
 import numpy as np
@@ -1603,3 +1604,127 @@ class TestObservingSequenceIntegration:
         assert cal1.n_files == 2
         assert sci.n_files == 2
         assert cal2.n_files == 1
+
+
+class TestObservationDate:
+    """Tests for the observation_date attribute."""
+
+    def test_default_is_none(self, sample_directory):
+        """Default observation_date is None."""
+        block = ObservingBlock(
+            block_type=BlockType.SCI,
+            target="test target",
+            directory=sample_directory,
+            file_range=(5001, 5003),
+        )
+        assert block.observation_date is None
+
+    def test_set_with_date_object(self, sample_directory):
+        """Accept datetime.date at construction."""
+        date = datetime.date(2024, 11, 8)
+        block = ObservingBlock(
+            block_type=BlockType.SCI,
+            target="test target",
+            directory=sample_directory,
+            file_range=(5001, 5003),
+            observation_date=date,
+        )
+        assert block.observation_date == date
+
+    def test_set_with_iso_string(self, sample_directory):
+        """Accept ISO string and auto-convert to date."""
+        block = ObservingBlock(
+            block_type=BlockType.SCI,
+            target="test target",
+            directory=sample_directory,
+            file_range=(5001, 5003),
+            observation_date="2024-11-08",
+        )
+        assert block.observation_date == datetime.date(2024, 11, 8)
+        assert isinstance(block.observation_date, datetime.date)
+
+    def test_invalid_string_raises_valueerror(self, sample_directory):
+        """Raise ValueError for non-ISO date string."""
+        with pytest.raises(ValueError):
+            ObservingBlock(
+                block_type=BlockType.SCI,
+                target="test target",
+                directory=sample_directory,
+                file_range=(5001, 5003),
+                observation_date="not-a-date",
+            )
+
+    def test_invalid_type_raises_typeerror(self, sample_directory):
+        """Raise TypeError for unsupported type."""
+        with pytest.raises(TypeError):
+            ObservingBlock(
+                block_type=BlockType.SCI,
+                target="test target",
+                directory=sample_directory,
+                file_range=(5001, 5003),
+                observation_date=12345,
+            )
+
+    @pytest.mark.parametrize(
+        "date_input",
+        [
+            datetime.date(2024, 11, 8),
+            "2024-11-08",
+        ],
+    )
+    def test_sequence_set_observation_date(
+        self,
+        sci_block,
+        cal_block,
+        date_input,
+    ):
+        """Set observation_date on all blocks via sequence."""
+        seq = ObservingSequence(
+            blocks=[sci_block, cal_block],
+            name="test sequence",
+        )
+        seq.set_observation_date(date_input)
+        for block in seq:
+            assert block.observation_date == datetime.date(2024, 11, 8)
+
+    def test_sequence_set_observation_date_invalid(self, sci_block):
+        """Raise ValueError for invalid string in sequence."""
+        seq = ObservingSequence(blocks=[sci_block])
+        with pytest.raises(ValueError):
+            seq.set_observation_date("bad-date")
+
+    def test_summary_includes_date(self, sample_directory):
+        """Summary shows date when set."""
+        block = ObservingBlock(
+            block_type=BlockType.SCI,
+            target="test target",
+            directory=sample_directory,
+            file_range=(5001, 5003),
+            observation_date="2024-11-08",
+        )
+        assert "2024-11-08" in block.summary()
+
+    def test_preserved_through_load_and_stack(self, sample_directory):
+        """observation_date survives load() and stack_frames()."""
+        block = ObservingBlock(
+            block_type=BlockType.SCI,
+            target="test target",
+            directory=sample_directory,
+            file_range=(5001, 5003),
+            observation_date="2024-11-08",
+        )
+        block.load()
+        assert block.observation_date == datetime.date(2024, 11, 8)
+        block.stack_frames(group_size=3)
+        assert block.observation_date == datetime.date(2024, 11, 8)
+
+    def test_datetime_raises_typeerror(self, sample_directory):
+        """Raise TypeError for datetime.datetime (date only)."""
+        with pytest.raises(TypeError, match="datetime.datetime"):
+            ObservingBlock(
+                block_type=BlockType.SCI,
+                target="test target",
+                directory=sample_directory,
+                file_range=(5001, 5003),
+                observation_date=datetime.datetime(2024, 11, 8, 12, 30),
+            )
