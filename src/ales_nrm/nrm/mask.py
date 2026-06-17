@@ -473,7 +473,7 @@ class NRMMask:
 
     def compute_splodge_positions(
         self,
-        wavelengths: np.ndarray,
+        wavelengths: np.ndarray | float,
         pixel_scale_arcsec: float = ALES_PIXEL_SCALE_ARCSEC,
         ny: int = 67,
         nx: int = 67,
@@ -490,8 +490,8 @@ class NRMMask:
         ``ObservingBlock.power_spectra`` format.
 
         Args:
-            wavelengths: 1D array of wavelengths in
-                microns.
+            wavelengths: 1D array or float of wavelengths
+                in microns.
             pixel_scale_arcsec: Image pixel scale in
                 arcsec/pixel. Default is 0.0345 (ALES).
             ny: Number of pixels in y dimension of the
@@ -505,6 +505,8 @@ class NRMMask:
             ``(y_pixel, x_pixel)`` positions in the
             centered FFT frame.
         """
+        wavelengths = np.atleast_1d(np.asarray(wavelengths, dtype=float))
+
         pixel_scale_rad = pixel_scale_arcsec * np.pi / (3600 * 180)
         center_y = (ny - 1) / 2.0
         center_x = (nx - 1) / 2.0
