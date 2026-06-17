@@ -12,7 +12,10 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from ales_nrm.observables import Observables
+
 if TYPE_CHECKING:
+    from ales_nrm.nrm.mask import NRMMask
     from ales_nrm.observation import ObservingBlock
 
 
@@ -198,3 +201,86 @@ def extract_observables(
         result["compl_vis"] = compl_vis
 
     return result
+
+
+def build_observables_from_sampy(
+    block: "ObservingBlock",
+    mask: "NRMMask",
+    extracted: dict,
+) -> Observables:
+    """Create Observables instance and populate with extraction results.
+
+    Creates an Observables container from the block and mask geometry,
+    then fills in the observable arrays by stacking per-wavelength
+    SAMpy results into ``(n_baselines, n_wav)`` /
+    ``(n_triangles, n_wav)`` arrays.
+
+    Args:
+        block: The source ObservingBlock (provides metadata and timing).
+        mask: The NRMMask used for extraction (provides geometry).
+        extracted: Dict returned by ``extract_observables()``.
+            Top-level keys: ``'wavelengths'``, and optionally
+            ``'cp'``, ``'vis2'``, ``'compl_vis'``, each mapping
+            wavelength floats to SAMpy result dicts.
+
+    Returns:
+        Populated Observables instance with extraction_backend="sampy".
+    """
+    obs = Observables.from_block_and_mask(block, mask)
+    obs.extraction_backend = "sampy"
+
+    n_wav = obs.n_wav
+    n_bl = obs.n_baselines
+    n_tri = obs.n_triangles
+
+    # Build wavelength-to-column-index mapping
+    wav_to_idx = {float(w): i for i, w in enumerate(obs.wavelengths)}
+
+    if "cp" in extracted:
+        cp_dict = extracted["cp"]
+        t3phi = np.full((n_tri, n_wav), np.nan)
+        t3phi_err = np.full((n_tri, n_wav), np.nan)
+        t3amp = np.full((n_tri, n_wav), np.nan)
+        for wl, sampy_result in cp_dict.items():
+            idx = wav_to_idx[float(wl)]
+            t3phi[:, idx] = sampy_result["closure_phases"]
+            t3amp[:, idx] = sampy_result["triple_amps"]
+            if sampy_result["std_error"] is not None:
+                t3phi_err[:, idx] = sampy_result["std_error"]
+        obs.t3phi = t3phi
+        obs.t3phi_err = t3phi_err
+        obs.t3amp = t3amp
+        # No errors available from SAMpy for t3amp; write nan
+        obs.t3amp_err = np.full((n_tri, n_wav), np.nan)
+        obs.t3_flag = np.zeros((n_tri, n_wav), dtype=bool)
+
+    if "vis2" in extracted:
+        vis2_dict = extracted["vis2"]
+        vis2 = np.full((n_bl, n_wav), np.nan)
+        vis2_err = np.full((n_bl, n_wav), np.nan)
+        for wl, sampy_result in vis2_dict.items():
+            idx = wav_to_idx[float(wl)]
+            vis2[:, idx] = sampy_result["v2"]
+            if sampy_result["std_error"] is not None:
+                vis2_err[:, idx] = sampy_result["std_error"]
+        obs.vis2 = vis2
+        obs.vis2_err = vis2_err
+        obs.vis2_flag = np.zeros((n_bl, n_wav), dtype=bool)
+
+    # No errors available from SAMpy for visamp/visphi from calc_cvis
+    # (returns None); write nan
+    if "compl_vis" in extracted:
+        cvis_dict = extracted["compl_vis"]
+        visamp = np.full((n_bl, n_wav), np.nan)
+        visphi = np.full((n_bl, n_wav), np.nan)
+        for wl, sampy_result in cvis_dict.items():
+            idx = wav_to_idx[float(wl)]
+            visamp[:, idx] = sampy_result["amplitudes"]
+            visphi[:, idx] = sampy_result["phases"]
+        obs.visamp = visamp
+        obs.visphi = visphi
+        obs.visamp_err = np.full((n_bl, n_wav), np.nan)
+        obs.visphi_err = np.full((n_bl, n_wav), np.nan)
+        obs.vis_flag = np.zeros((n_bl, n_wav), dtype=bool)
+
+    return obs
