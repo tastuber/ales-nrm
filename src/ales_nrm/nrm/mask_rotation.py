@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 def find_mask_rotation_angle(
     power_spectra: np.ndarray,
     mask: NRMMask,
-    wavelengths: np.ndarray,
+    wavelengths: np.ndarray | float,
     pixel_scale_arcsec: float = ALES_PIXEL_SCALE_ARCSEC,
     angle_range: tuple[float, float] = (-20.0, 20.0),
     n_grid: int = 81,
@@ -73,8 +73,8 @@ def find_mask_rotation_angle(
               multiple frames, multiple wavelengths
         mask: NRMMask instance with hole and baseline
             geometry.
-        wavelengths: 1D array of wavelengths in microns,
-            matching the wavelength dimension.
+        wavelengths: 1D array or float of wavelengths in microns,
+            matching the wavelength dimension of power_spectra.
         pixel_scale_arcsec: Pixel scale in
             arcsec/pixel. Default is ALES (0.0345).
         angle_range: Search range in degrees for the
@@ -118,7 +118,7 @@ def find_mask_rotation_angle(
         )
 
     n_files, n_wav, ny, nx = power_spectra.shape
-    wavelengths = np.asarray(wavelengths, dtype=np.float64)
+    wavelengths = np.atleast_1d(np.asarray(wavelengths, dtype=float))
 
     if len(wavelengths) != n_wav:
         raise ValueError(
