@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 
-from ales_nrm.nrm.mask import ALES_PIXEL_SCALE_ARCSEC, NRMMask
+from ales_nrm.nrm.mask import ALES_PIXEL_SCALE_ARCSEC
 from ales_nrm.sampy_interface.coords import (
     _compute_zero_spacing_radius,
     _convert_mask_to_sampy,
@@ -15,24 +15,6 @@ from ales_nrm.sampy_interface.coords import (
     _make_cache_dirname,
     setup_sampy_coords,
 )
-
-
-@pytest.fixture()
-def ales_mask():
-    """Load the bundled ALES 6-hole mask."""
-    return NRMMask.from_bundled()
-
-
-@pytest.fixture()
-def sample_wavelengths_short():
-    """A small wavelength array for fast tests."""
-    return np.array([2.7, 4.3])
-
-
-@pytest.fixture()
-def single_wavelength():
-    """A single wavelength for tests requiring one channel."""
-    return 3.5
 
 
 def _make_sampy_mocks(mock_make_coords):
@@ -47,50 +29,50 @@ def _make_sampy_mocks(mock_make_coords):
 class TestConvertMaskToSampy:
     """Tests for _convert_mask_to_sampy."""
 
-    def test_output_has_correct_shape(self, ales_mask, tmp_path):
+    def test_output_has_correct_shape(self, bundled_mask, tmp_path):
         """Output file has 6 lines, 2 columns."""
         out = tmp_path / "mask.txt"
-        _convert_mask_to_sampy(ales_mask, out)
+        _convert_mask_to_sampy(bundled_mask, out)
 
         data = np.loadtxt(out)
         assert data.shape == (6, 2)
 
-    def test_centered_coordinates_near_zero(self, ales_mask, tmp_path):
+    def test_centered_coordinates_near_zero(self, bundled_mask, tmp_path):
         """With center=True, centroid is at origin."""
         out = tmp_path / "mask.txt"
-        _convert_mask_to_sampy(ales_mask, out, center=True)
+        _convert_mask_to_sampy(bundled_mask, out, center=True)
 
         data = np.loadtxt(out)
         centroid = data.mean(axis=0)
         assert abs(centroid[0]) < 1e-10
         assert abs(centroid[1]) < 1e-10
 
-    def test_uncentered_preserves_original(self, ales_mask, tmp_path):
+    def test_uncentered_preserves_original(self, bundled_mask, tmp_path):
         """With center=False, coordinates must match original."""
         out = tmp_path / "mask.txt"
-        _convert_mask_to_sampy(ales_mask, out, center=False)
+        _convert_mask_to_sampy(bundled_mask, out, center=False)
 
         data = np.loadtxt(out)
-        for i, hole in enumerate(ales_mask.holes):
+        for i, hole in enumerate(bundled_mask.holes):
             assert data[i, 0] == pytest.approx(hole.x, abs=1e-8)
             assert data[i, 1] == pytest.approx(hole.y, abs=1e-8)
 
-    def test_centered_values_match_shifted_holes(self, ales_mask, tmp_path):
+    def test_centered_values_match_shifted_holes(self, bundled_mask, tmp_path):
         """Centered coordinates equal original minus centroid."""
         out = tmp_path / "mask.txt"
-        _convert_mask_to_sampy(ales_mask, out, center=True)
+        _convert_mask_to_sampy(bundled_mask, out, center=True)
 
         data = np.loadtxt(out)
-        coords = np.array([[h.x, h.y] for h in ales_mask.holes])
+        coords = np.array([[h.x, h.y] for h in bundled_mask.holes])
         centroid = coords.mean(axis=0)
         expected = coords - centroid
 
         np.testing.assert_allclose(data, expected, atol=1e-8)
 
-    def test_creates_parent_directories(self, ales_mask, tmp_path):
+    def test_creates_parent_directories(self, bundled_mask, tmp_path):
         """Intermediate directories are created."""
         out = tmp_path / "a" / "b" / "c" / "mask.txt"
-        _convert_mask_to_sampy(ales_mask, out)
+        _convert_mask_to_sampy(bundled_mask, out)
 
         assert out.exists()
         data = np.loadtxt(out)
@@ -315,7 +297,7 @@ class TestSetupSampyCoords:
     """Tests for setup_sampy_coords (mocked SAMpy)."""
 
     def test_calls_make_coords_per_wavelength(
-        self, ales_mask, sample_wavelengths_short, tmp_path
+        self, bundled_mask, sample_wavelengths_short, tmp_path
     ):
         """make_coords called once per wavelength."""
         mock_make_coords = MagicMock()
@@ -329,7 +311,7 @@ class TestSetupSampyCoords:
             },
         ):
             result = setup_sampy_coords(
-                ales_mask,
+                bundled_mask,
                 sample_wavelengths_short,
                 tmp_path / "cache",
                 force_recompute=True,
@@ -339,7 +321,7 @@ class TestSetupSampyCoords:
         assert len(result) == len(sample_wavelengths_short)
 
     def test_correct_default_arguments_passed(
-        self, ales_mask, sample_wavelengths_short, tmp_path
+        self, bundled_mask, sample_wavelengths_short, tmp_path
     ):
         """make_coords receives correct default params."""
         mock_make_coords = MagicMock()
@@ -353,7 +335,7 @@ class TestSetupSampyCoords:
             },
         ):
             setup_sampy_coords(
-                ales_mask,
+                bundled_mask,
                 sample_wavelengths_short,
                 tmp_path / "cache",
                 force_recompute=True,
@@ -370,11 +352,11 @@ class TestSetupSampyCoords:
         assert kw["spectral_sampling"] == 1
         assert kw["recompute"] is True
         assert kw["fourier_cutoff"] == 0.4
-        expected_diam = 2.0 * ales_mask.holes[0].radius
+        expected_diam = 2.0 * bundled_mask.holes[0].radius
         assert kw["subaperture_diameter"] == pytest.approx(expected_diam)
 
     def test_custom_arguments_passed(
-        self, ales_mask, single_wavelength, tmp_path
+        self, bundled_mask, single_wavelength, tmp_path
     ):
         """Custom parameters are forwarded correctly."""
         mock_make_coords = MagicMock()
@@ -388,7 +370,7 @@ class TestSetupSampyCoords:
             },
         ):
             setup_sampy_coords(
-                ales_mask,
+                bundled_mask,
                 single_wavelength,
                 tmp_path / "cache",
                 pixel_scale=0.05,
@@ -407,7 +389,7 @@ class TestSetupSampyCoords:
         assert kw["fourier_cutoff"] == 0.3
 
     def test_auto_zero_spacing_varies_with_wavelength(
-        self, ales_mask, sample_wavelengths_short, tmp_path
+        self, bundled_mask, sample_wavelengths_short, tmp_path
     ):
         """Auto zero_spacing_radius differs per wavelength."""
         calls_kwargs = []
@@ -424,7 +406,7 @@ class TestSetupSampyCoords:
             },
         ):
             setup_sampy_coords(
-                ales_mask,
+                bundled_mask,
                 sample_wavelengths_short,
                 tmp_path / "cache",
                 zero_spacing_radius=None,
@@ -437,7 +419,7 @@ class TestSetupSampyCoords:
         assert zsr_short > zsr_long
 
     def test_fixed_zero_spacing_same_for_all(
-        self, ales_mask, sample_wavelengths_short, tmp_path
+        self, bundled_mask, sample_wavelengths_short, tmp_path
     ):
         """Fixed zero_spacing_radius used for all wavelengths."""
         calls_kwargs = []
@@ -454,7 +436,7 @@ class TestSetupSampyCoords:
             },
         ):
             setup_sampy_coords(
-                ales_mask,
+                bundled_mask,
                 sample_wavelengths_short,
                 tmp_path / "cache",
                 zero_spacing_radius=25,
@@ -465,7 +447,7 @@ class TestSetupSampyCoords:
         assert calls_kwargs[1]["zero_spacing_radius"] == 25
 
     def test_caching_skips_existing(
-        self, ales_mask, sample_wavelengths_short, tmp_path
+        self, bundled_mask, sample_wavelengths_short, tmp_path
     ):
         """Existing coordinate directories are skipped."""
         cache = tmp_path / "cache"
@@ -474,14 +456,14 @@ class TestSetupSampyCoords:
 
         # Pre-create mask file and coord dirs using parametrized name
         cache_dirname = _make_cache_dirname(
-            ales_mask.source_name,
+            bundled_mask.source_name,
             501,
             ALES_PIXEL_SCALE_ARCSEC,
             0.01,
             0.4,
         )
         mask_cache = cache / cache_dirname
-        mask_file = mask_cache / f"{ales_mask.source_name}_sampy.txt"
+        mask_file = mask_cache / f"{bundled_mask.source_name}_sampy.txt"
         mask_file.parent.mkdir(parents=True)
         mask_file.write_text("dummy")
         for wl in sample_wavelengths_short:
@@ -496,7 +478,7 @@ class TestSetupSampyCoords:
             },
         ):
             result = setup_sampy_coords(
-                ales_mask,
+                bundled_mask,
                 sample_wavelengths_short,
                 cache,
                 force_recompute=False,
@@ -506,7 +488,7 @@ class TestSetupSampyCoords:
         assert len(result) == len(sample_wavelengths_short)
 
     def test_incremental_wavelength_addition(
-        self, ales_mask, sample_wavelengths_short, tmp_path
+        self, bundled_mask, sample_wavelengths_short, tmp_path
     ):
         """New wavelengths computed, existing skipped."""
         cache = tmp_path / "cache"
@@ -515,14 +497,14 @@ class TestSetupSampyCoords:
 
         # Pre-create mask file and one wavelength
         cache_dirname = _make_cache_dirname(
-            ales_mask.source_name,
+            bundled_mask.source_name,
             501,
             ALES_PIXEL_SCALE_ARCSEC,
             0.01,
             0.4,
         )
         mask_cache = cache / cache_dirname
-        mask_file = mask_cache / f"{ales_mask.source_name}_sampy.txt"
+        mask_file = mask_cache / f"{bundled_mask.source_name}_sampy.txt"
         mask_file.parent.mkdir(parents=True)
         mask_file.write_text("dummy")
         existing = (
@@ -540,7 +522,7 @@ class TestSetupSampyCoords:
             },
         ):
             result = setup_sampy_coords(
-                ales_mask,
+                bundled_mask,
                 sample_wavelengths_short,
                 cache,
                 force_recompute=False,
@@ -551,7 +533,7 @@ class TestSetupSampyCoords:
         assert len(result) == len(sample_wavelengths_short)
 
     def test_force_recompute_deletes_cache(
-        self, ales_mask, sample_wavelengths_short, tmp_path
+        self, bundled_mask, sample_wavelengths_short, tmp_path
     ):
         """force_recompute removes stale cache files."""
         cache = tmp_path / "cache"
@@ -560,7 +542,7 @@ class TestSetupSampyCoords:
 
         # Pre-create stale artifact using parametrized name
         cache_dirname = _make_cache_dirname(
-            ales_mask.source_name,
+            bundled_mask.source_name,
             501,
             ALES_PIXEL_SCALE_ARCSEC,
             0.01,
@@ -579,7 +561,7 @@ class TestSetupSampyCoords:
             },
         ):
             setup_sampy_coords(
-                ales_mask,
+                bundled_mask,
                 sample_wavelengths_short,
                 cache,
                 force_recompute=True,
@@ -589,7 +571,7 @@ class TestSetupSampyCoords:
         assert mask_cache.exists()
 
     def test_return_dict_keys_are_wavelengths(
-        self, ales_mask, sample_wavelengths_short, tmp_path
+        self, bundled_mask, sample_wavelengths_short, tmp_path
     ):
         """Return dict keys match input wavelengths."""
         mock_make_coords = MagicMock()
@@ -603,7 +585,7 @@ class TestSetupSampyCoords:
             },
         ):
             result = setup_sampy_coords(
-                ales_mask,
+                bundled_mask,
                 sample_wavelengths_short,
                 tmp_path / "cache",
                 force_recompute=True,
@@ -613,7 +595,7 @@ class TestSetupSampyCoords:
             assert float(wl) in result
 
     def test_return_dict_values_are_paths(
-        self, ales_mask, sample_wavelengths_short, tmp_path
+        self, bundled_mask, sample_wavelengths_short, tmp_path
     ):
         """Return dict values are Path objects."""
         mock_make_coords = MagicMock()
@@ -627,7 +609,7 @@ class TestSetupSampyCoords:
             },
         ):
             result = setup_sampy_coords(
-                ales_mask,
+                bundled_mask,
                 sample_wavelengths_short,
                 tmp_path / "cache",
                 force_recompute=True,
@@ -637,7 +619,7 @@ class TestSetupSampyCoords:
             assert isinstance(path, Path)
 
     def test_directory_structure(
-        self, ales_mask, sample_wavelengths_short, tmp_path
+        self, bundled_mask, sample_wavelengths_short, tmp_path
     ):
         """Cache uses parametrized subdirectory structure."""
         cache = tmp_path / "cache"
@@ -652,14 +634,14 @@ class TestSetupSampyCoords:
             },
         ):
             setup_sampy_coords(
-                ales_mask,
+                bundled_mask,
                 sample_wavelengths_short,
                 cache,
                 force_recompute=True,
             )
 
         cache_dirname = _make_cache_dirname(
-            ales_mask.source_name,
+            bundled_mask.source_name,
             501,
             ALES_PIXEL_SCALE_ARCSEC,
             0.01,
@@ -667,7 +649,7 @@ class TestSetupSampyCoords:
         )
         mask_cache = cache / cache_dirname
 
-        sampy_mask = mask_cache / f"{ales_mask.source_name}_sampy.txt"
+        sampy_mask = mask_cache / f"{bundled_mask.source_name}_sampy.txt"
         assert sampy_mask.exists()
         data = np.loadtxt(sampy_mask)
         assert data.shape == (6, 2)
@@ -675,10 +657,10 @@ class TestSetupSampyCoords:
         assert abs(centroid[0]) < 1e-10
         assert abs(centroid[1]) < 1e-10
 
-        source_copy = mask_cache / f"{ales_mask.source_name}.txt"
+        source_copy = mask_cache / f"{bundled_mask.source_name}.txt"
         assert source_copy.exists()
 
-        rotated = mask_cache / f"{ales_mask.source_name}_rotated.txt"
+        rotated = mask_cache / f"{bundled_mask.source_name}_rotated.txt"
         assert rotated.exists()
 
         filter_dir = mask_cache / "filters"
@@ -691,7 +673,7 @@ class TestSetupSampyCoords:
             assert d.exists()
 
     def test_rotated_mask_has_hole_data(
-        self, ales_mask, sample_wavelengths_short, tmp_path
+        self, bundled_mask, sample_wavelengths_short, tmp_path
     ):
         """Rotated mask file contains rotated hole coordinates."""
         cache = tmp_path / "cache"
@@ -703,29 +685,29 @@ class TestSetupSampyCoords:
             {"sampy": mock_sampy, "sampy.mask": mock_module},
         ):
             setup_sampy_coords(
-                ales_mask,
+                bundled_mask,
                 sample_wavelengths_short,
                 cache,
                 force_recompute=True,
             )
 
         cache_dirname = _make_cache_dirname(
-            ales_mask.source_name,
+            bundled_mask.source_name,
             501,
             ALES_PIXEL_SCALE_ARCSEC,
             0.01,
             0.4,
         )
         rotated = (
-            cache / cache_dirname / f"{ales_mask.source_name}_rotated.txt"
+            cache / cache_dirname / f"{bundled_mask.source_name}_rotated.txt"
         )
         content = rotated.read_text()
         assert "Rotation:" in content
-        for hole in ales_mask.holes:
+        for hole in bundled_mask.holes:
             assert hole.name in content
 
     def test_source_mask_is_verbatim_copy(
-        self, ales_mask, sample_wavelengths_short, tmp_path
+        self, bundled_mask, sample_wavelengths_short, tmp_path
     ):
         """Source mask file contains original content."""
         cache = tmp_path / "cache"
@@ -737,24 +719,24 @@ class TestSetupSampyCoords:
             {"sampy": mock_sampy, "sampy.mask": mock_module},
         ):
             setup_sampy_coords(
-                ales_mask,
+                bundled_mask,
                 sample_wavelengths_short,
                 cache,
                 force_recompute=True,
             )
 
         cache_dirname = _make_cache_dirname(
-            ales_mask.source_name,
+            bundled_mask.source_name,
             501,
             ALES_PIXEL_SCALE_ARCSEC,
             0.01,
             0.4,
         )
-        source_copy = cache / cache_dirname / f"{ales_mask.source_name}.txt"
-        assert source_copy.read_text() == ales_mask.source_content
+        source_copy = cache / cache_dirname / f"{bundled_mask.source_name}.txt"
+        assert source_copy.read_text() == bundled_mask.source_content
 
     def test_import_error_message(
-        self, ales_mask, sample_wavelengths_short, tmp_path
+        self, bundled_mask, sample_wavelengths_short, tmp_path
     ):
         """Clear error when SAMpy is not installed."""
         with patch.dict(
@@ -763,13 +745,13 @@ class TestSetupSampyCoords:
         ):
             with pytest.raises(ImportError, match="SAMpy is required"):
                 setup_sampy_coords(
-                    ales_mask,
+                    bundled_mask,
                     sample_wavelengths_short,
                     tmp_path / "cache",
                 )
 
     def test_output_dir_has_trailing_slash(
-        self, ales_mask, sample_wavelengths_short, tmp_path
+        self, bundled_mask, sample_wavelengths_short, tmp_path
     ):
         """SAMpy expects output_dir to end with '/'."""
         mock_make_coords = MagicMock()
@@ -783,7 +765,7 @@ class TestSetupSampyCoords:
             },
         ):
             setup_sampy_coords(
-                ales_mask,
+                bundled_mask,
                 sample_wavelengths_short,
                 tmp_path / "cache",
                 force_recompute=True,
@@ -793,7 +775,7 @@ class TestSetupSampyCoords:
         assert kw["output_dir"].endswith("/")
 
     def test_suppress_plots_default_true(
-        self, ales_mask, sample_wavelengths_short, tmp_path
+        self, bundled_mask, sample_wavelengths_short, tmp_path
     ):
         """Default suppress_plots=True activates ioff."""
         mock_make_coords = MagicMock()
@@ -808,7 +790,7 @@ class TestSetupSampyCoords:
         ):
             with patch("matplotlib.pyplot.ioff") as mock_ioff:
                 setup_sampy_coords(
-                    ales_mask,
+                    bundled_mask,
                     sample_wavelengths_short,
                     tmp_path / "cache",
                     force_recompute=True,
@@ -817,7 +799,7 @@ class TestSetupSampyCoords:
                 mock_ioff.assert_called()
 
     def test_suppress_plots_false_no_suppression(
-        self, ales_mask, sample_wavelengths_short, tmp_path
+        self, bundled_mask, sample_wavelengths_short, tmp_path
     ):
         """suppress_plots=False skips plot suppression."""
         mock_make_coords = MagicMock()
@@ -832,7 +814,7 @@ class TestSetupSampyCoords:
         ):
             with patch("matplotlib.pyplot.ioff") as mock_ioff:
                 setup_sampy_coords(
-                    ales_mask,
+                    bundled_mask,
                     sample_wavelengths_short,
                     tmp_path / "cache",
                     force_recompute=True,
@@ -841,7 +823,7 @@ class TestSetupSampyCoords:
                 mock_ioff.assert_not_called()
 
     def test_single_wavelength_scalar(
-        self, ales_mask, single_wavelength, tmp_path
+        self, bundled_mask, single_wavelength, tmp_path
     ):
         """Single float wavelength accepted."""
         mock_make_coords = MagicMock()
@@ -855,7 +837,7 @@ class TestSetupSampyCoords:
             },
         ):
             result = setup_sampy_coords(
-                ales_mask,
+                bundled_mask,
                 single_wavelength,
                 tmp_path / "cache",
                 force_recompute=True,
@@ -865,7 +847,7 @@ class TestSetupSampyCoords:
         assert single_wavelength in result
 
     def test_different_params_different_cache_dirs(
-        self, ales_mask, single_wavelength, tmp_path
+        self, bundled_mask, single_wavelength, tmp_path
     ):
         """Different parameters use separate cache directories."""
         cache = tmp_path / "cache"
@@ -880,14 +862,14 @@ class TestSetupSampyCoords:
             },
         ):
             result1 = setup_sampy_coords(
-                ales_mask,
+                bundled_mask,
                 single_wavelength,
                 cache,
                 n_pixels=501,
                 force_recompute=True,
             )
             result2 = setup_sampy_coords(
-                ales_mask,
+                bundled_mask,
                 single_wavelength,
                 cache,
                 n_pixels=1001,
@@ -901,7 +883,7 @@ class TestSetupSampyCoords:
         assert path1.parent.parent != path2.parent.parent
 
     def test_same_params_same_cache_dir(
-        self, ales_mask, single_wavelength, tmp_path
+        self, bundled_mask, single_wavelength, tmp_path
     ):
         """Same parameters reuse the same cache directory."""
         cache = tmp_path / "cache"
@@ -916,14 +898,14 @@ class TestSetupSampyCoords:
             },
         ):
             result1 = setup_sampy_coords(
-                ales_mask,
+                bundled_mask,
                 single_wavelength,
                 cache,
                 force_recompute=True,
             )
             # Second call without force_recompute should find cache
             result2 = setup_sampy_coords(
-                ales_mask,
+                bundled_mask,
                 single_wavelength,
                 cache,
                 force_recompute=False,
@@ -940,7 +922,7 @@ class TestSetupSampyCoordsIntegration:
     """Integration tests that call real SAMpy."""
 
     def test_single_wavelength_produces_fits(
-        self, ales_mask, sample_wavelengths_short, tmp_path
+        self, bundled_mask, sample_wavelengths_short, tmp_path
     ):
         """Real make_coords produces expected FITS files.
 
@@ -949,7 +931,7 @@ class TestSetupSampyCoordsIntegration:
         cache = tmp_path / "cache"
 
         result = setup_sampy_coords(
-            ales_mask,
+            bundled_mask,
             sample_wavelengths_short,
             cache,
             force_recompute=True,
@@ -972,13 +954,13 @@ class TestSetupSampyCoordsIntegration:
                 assert (coord_dir / f"ind{i}_vert{j}.fits").exists()
 
     def test_multiple_wavelengths_all_complete(
-        self, ales_mask, sample_wavelengths_short, tmp_path
+        self, bundled_mask, sample_wavelengths_short, tmp_path
     ):
         """Multiple wavelengths all produce output."""
         cache = tmp_path / "cache"
 
         result = setup_sampy_coords(
-            ales_mask,
+            bundled_mask,
             sample_wavelengths_short,
             cache,
             force_recompute=True,
@@ -1001,7 +983,7 @@ class TestSetupSampyCoordsIntegration:
                     assert (coord_dir / f"ind{i}_vert{j}.fits").exists()
 
     def test_no_interactive_plots_shown(
-        self, ales_mask, sample_wavelengths_short, tmp_path
+        self, bundled_mask, sample_wavelengths_short, tmp_path
     ):
         """Completion confirms plot suppression.
 
@@ -1013,7 +995,7 @@ class TestSetupSampyCoordsIntegration:
         cache = tmp_path / "cache"
 
         result = setup_sampy_coords(
-            ales_mask,
+            bundled_mask,
             sample_wavelengths_short,
             cache,
             force_recompute=True,

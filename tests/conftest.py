@@ -4,6 +4,8 @@ import numpy as np
 import pytest
 from astropy.io import fits
 
+from ales_nrm.nrm.mask import Hole, NRMMask
+
 
 @pytest.fixture()
 def rng():
@@ -15,6 +17,37 @@ def rng():
 def sample_wavelengths():
     """Provide a realistic ALES wavelength array."""
     return np.linspace(2.768, 4.290, 98)
+
+
+@pytest.fixture()
+def single_wavelength():
+    """A single wavelength for tests requiring one channel."""
+    return 3.5
+
+
+@pytest.fixture()
+def sample_wavelengths_short():
+    """Two-channel wavelength array for fast tests."""
+    return np.array([2.7, 4.3])
+
+
+@pytest.fixture()
+def bundled_mask():
+    """Load the bundled LBTI NRM6 SX mask."""
+    return NRMMask.from_bundled("lbti_nrm6_sx")
+
+
+@pytest.fixture()
+def three_hole_mask():
+    """Create a simple 3-hole mask for testing."""
+    holes = [
+        Hole("H1", -1.0, 0.0, 0.4),
+        Hole("H2", 1.0, 0.0, 0.4),
+        Hole("H3", 0.0, 1.5, 0.4),
+    ]
+    mask = NRMMask(primary_diameter=8.4, holes=holes)
+    mask._compute_baselines()
+    return mask
 
 
 @pytest.fixture()

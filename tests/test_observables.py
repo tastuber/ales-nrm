@@ -101,12 +101,6 @@ def sample_triangles():
 
 
 @pytest.fixture()
-def sample_wavelengths_short():
-    """A small wavelength array for fast tests."""
-    return np.array([2.7, 4.3])
-
-
-@pytest.fixture()
 def sample_observables(
     sample_stations,
     sample_baselines,
@@ -156,7 +150,7 @@ def populated_observables(sample_observables):
 
 
 @pytest.fixture()
-def mock_block():
+def mock_block(sample_wavelengths_short):
     """Create a mock ObservingBlock for from_block_and_mask."""
     block = MagicMock()
     block.parallactic_angles = np.array([10.0, 12.0, 14.0])
@@ -166,7 +160,7 @@ def mock_block():
         dtype=object,
     )
     block.target = "HD12345"
-    block.wavelengths = np.array([3.0, 3.5, 4.0])
+    block.wavelengths = sample_wavelengths_short
     block.block_type = "SCI"
     return block
 

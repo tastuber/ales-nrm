@@ -11,33 +11,6 @@ from ales_nrm.nrm.mask import (
 )
 
 
-@pytest.fixture()
-def sample_holes():
-    """Create a simple 3-hole mask for testing."""
-    return [
-        Hole("H1", -1.0, 0.0, 0.4),
-        Hole("H2", 1.0, 0.0, 0.4),
-        Hole("H3", 0.0, 1.5, 0.4),
-    ]
-
-
-@pytest.fixture()
-def three_hole_mask(sample_holes):
-    """Create a 3-hole NRMMask instance."""
-    mask = NRMMask(
-        primary_diameter=8.4,
-        holes=sample_holes,
-    )
-    mask._compute_baselines()
-    return mask
-
-
-@pytest.fixture()
-def bundled_mask():
-    """Load the bundled LBTI NRM6 SX mask."""
-    return NRMMask.from_bundled("lbti_nrm6_sx", primary_diameter=8.4)
-
-
 class TestHole:
     """Tests for the Hole dataclass."""
 
@@ -360,16 +333,15 @@ class TestMaskRotationAtLoad:
             mask_plain.holes[0].x, abs=0.001
         )
 
-    def test_splodge_distances_preserved(self):
+    def test_splodge_distances_preserved(self, single_wavelength):
         """Splodge distances from center invariant."""
-        wavelengths = np.array([3.5])
         mask_plain = NRMMask.from_bundled("lbti_nrm6_sx")
         mask_rot = NRMMask.from_bundled("lbti_nrm6_sx", angle_deg=10.0)
         pos_plain = mask_plain.compute_splodge_positions(
-            wavelengths, ny=501, nx=501
+            single_wavelength, ny=501, nx=501
         )
         pos_rot = mask_rot.compute_splodge_positions(
-            wavelengths, ny=501, nx=501
+            single_wavelength, ny=501, nx=501
         )
         center_y = 250.0
         center_x = 250.0
@@ -384,9 +356,9 @@ class TestMaskRotationAtLoad:
             )
             assert d_rot == pytest.approx(d_plain, rel=1e-6)
 
-    def test_power_spectrum_changes_with_rotation(self):
+    def test_power_spectrum_changes_with_rotation(self, single_wavelength):
         """Power spectrum peak positions shift."""
-        wavelength = 3.5
+        wavelength = single_wavelength
         mask_plain = NRMMask.from_bundled("lbti_nrm6_sx")
         mask_rot = NRMMask.from_bundled("lbti_nrm6_sx", angle_deg=15.0)
         ps_plain = mask_plain.compute_synthetic_power_spectrum(
@@ -493,57 +465,65 @@ class TestMakePupilImageBaseline:
 class TestComputeSyntheticPSF:
     """Tests for synthetic PSF computation."""
 
-    def test_output_shape_default(self, three_hole_mask):
+    def test_output_shape_default(self, three_hole_mask, single_wavelength):
         """Default output is 101x101."""
-        psf = three_hole_mask.compute_synthetic_psf(wavelength=3.5)
+        psf = three_hole_mask.compute_synthetic_psf(
+            wavelength=single_wavelength
+        )
         assert psf.shape == (101, 101)
 
-    def test_output_shape_custom(self, three_hole_mask):
+    def test_output_shape_custom(self, three_hole_mask, single_wavelength):
         """Custom output size is respected."""
         psf = three_hole_mask.compute_synthetic_psf(
-            wavelength=3.5, n_pixels_image=51
+            wavelength=single_wavelength, n_pixels_image=51
         )
         assert psf.shape == (51, 51)
 
-    def test_forced_odd_image(self, three_hole_mask):
+    def test_forced_odd_image(self, three_hole_mask, single_wavelength):
         """Even n_pixels_image forced to odd."""
         psf = three_hole_mask.compute_synthetic_psf(
-            wavelength=3.5, n_pixels_image=50
+            wavelength=single_wavelength, n_pixels_image=50
         )
         assert psf.shape == (51, 51)
 
-    def test_forced_odd_pupil(self, three_hole_mask):
+    def test_forced_odd_pupil(self, three_hole_mask, single_wavelength):
         """Even n_pixels_pupil forced to odd."""
         psf = three_hole_mask.compute_synthetic_psf(
-            wavelength=3.5, n_pixels_pupil=100
+            wavelength=single_wavelength, n_pixels_pupil=100
         )
         # Should still produce valid output.
         assert psf.shape[0] % 2 == 1
 
-    def test_peak_normalized(self, three_hole_mask):
+    def test_peak_normalized(self, three_hole_mask, single_wavelength):
         """PSF peak is normalized to 1."""
-        psf = three_hole_mask.compute_synthetic_psf(wavelength=3.5)
+        psf = three_hole_mask.compute_synthetic_psf(
+            wavelength=single_wavelength
+        )
         assert psf.max() == pytest.approx(1.0)
 
-    def test_nonnegative(self, three_hole_mask):
+    def test_nonnegative(self, three_hole_mask, single_wavelength):
         """PSF values are non-negative."""
-        psf = three_hole_mask.compute_synthetic_psf(wavelength=3.5)
+        psf = three_hole_mask.compute_synthetic_psf(
+            wavelength=single_wavelength
+        )
         assert np.all(psf >= 0)
 
-    def test_peak_near_center(self, three_hole_mask):
+    def test_peak_near_center(self, three_hole_mask, single_wavelength):
         """PSF peak is at or near the center pixel."""
         psf = three_hole_mask.compute_synthetic_psf(
-            wavelength=3.5, n_pixels_image=101
+            wavelength=single_wavelength, n_pixels_image=101
         )
         peak_y, peak_x = np.unravel_index(np.argmax(psf), psf.shape)
         center = 101 // 2
         assert abs(peak_y - center) <= 1
         assert abs(peak_x - center) <= 1
 
-    def test_default_pixel_scale(self, three_hole_mask):
+    def test_default_pixel_scale(self, three_hole_mask, single_wavelength):
         """Default pixel scale is ALES value."""
         # Should run without specifying pixel_scale.
-        psf = three_hole_mask.compute_synthetic_psf(wavelength=3.5)
+        psf = three_hole_mask.compute_synthetic_psf(
+            wavelength=single_wavelength
+        )
         assert psf.shape == (101, 101)
 
     def test_different_wavelengths(self, three_hole_mask):
@@ -557,20 +537,24 @@ class TestComputeSyntheticPSF:
         # Not identical.
         assert not np.allclose(psf1, psf2)
 
-    def test_large_image_does_not_crash(self, three_hole_mask):
+    def test_large_image_does_not_crash(
+        self, three_hole_mask, single_wavelength
+    ):
         """Large n_pixels_image works without error."""
         psf = three_hole_mask.compute_synthetic_psf(
-            wavelength=3.5,
+            wavelength=single_wavelength,
             n_pixels_image=201,
             n_pixels_pupil=101,
         )
         assert psf.shape == (201, 201)
 
-    def test_n_pixels_image_larger_than_n_pad(self, three_hole_mask):
+    def test_n_pixels_image_larger_than_n_pad(
+        self, three_hole_mask, single_wavelength
+    ):
         """Output works when n_pixels_image > natural n_pad."""
         # Use large pixel scale to make n_pad small.
         psf = three_hole_mask.compute_synthetic_psf(
-            wavelength=3.5,
+            wavelength=single_wavelength,
             pixel_scale_arcsec=0.5,
             n_pixels_image=201,
             n_pixels_pupil=51,
@@ -582,32 +566,34 @@ class TestComputeSyntheticPSF:
 class TestComputeSyntheticPowerSpectrum:
     """Tests for synthetic power spectrum."""
 
-    def test_output_shape(self, three_hole_mask):
+    def test_output_shape(self, three_hole_mask, single_wavelength):
         """Output matches requested size."""
         ps = three_hole_mask.compute_synthetic_power_spectrum(
-            wavelength=3.5, n_pixels_image=101
+            wavelength=single_wavelength, n_pixels_image=101
         )
         assert ps.shape == (101, 101)
 
-    def test_nonnegative(self, three_hole_mask):
+    def test_nonnegative(self, three_hole_mask, single_wavelength):
         """Power spectrum is non-negative."""
-        ps = three_hole_mask.compute_synthetic_power_spectrum(wavelength=3.5)
+        ps = three_hole_mask.compute_synthetic_power_spectrum(
+            wavelength=single_wavelength
+        )
         assert np.all(ps >= 0)
 
-    def test_dc_at_center(self, three_hole_mask):
+    def test_dc_at_center(self, three_hole_mask, single_wavelength):
         """DC component (maximum) is at center."""
         ps = three_hole_mask.compute_synthetic_power_spectrum(
-            wavelength=3.5, n_pixels_image=101
+            wavelength=single_wavelength, n_pixels_image=101
         )
         peak_y, peak_x = np.unravel_index(np.argmax(ps), ps.shape)
         center = 101 // 2
         assert peak_y == center
         assert peak_x == center
 
-    def test_symmetric(self, three_hole_mask):
+    def test_symmetric(self, three_hole_mask, single_wavelength):
         """Power spectrum has conjugate symmetry."""
         ps = three_hole_mask.compute_synthetic_power_spectrum(
-            wavelength=3.5, n_pixels_image=101
+            wavelength=single_wavelength, n_pixels_image=101
         )
         # PS should be symmetric: PS[y,x] ≈ PS[N-1-y, N-1-x]
         # For odd N, flipping reverses around the center pixel
@@ -619,22 +605,21 @@ class TestComputeSyntheticPowerSpectrum:
 class TestComputeSplodgePositions:
     """Tests for splodge position computation."""
 
-    def test_output_structure(self, three_hole_mask):
+    def test_output_structure(self, three_hole_mask, sample_wavelengths_short):
         """Returns dict with correct keys and shapes."""
-        wavelengths = np.array([3.0, 3.5, 4.0])
         positions = three_hole_mask.compute_splodge_positions(
-            wavelengths=wavelengths,
+            wavelengths=sample_wavelengths_short,
             ny=67,
             nx=67,
         )
         assert isinstance(positions, dict)
         assert len(positions) == 3  # 3 baselines
         for _name, coords in positions.items():
-            assert coords.shape == (3, 2)
+            assert coords.shape == (2, 2)  # two wavelengths, two coords
 
-    def test_default_parameters(self, three_hole_mask):
+    def test_default_parameters(self, three_hole_mask, single_wavelength):
         """Defaults use ALES pixel scale and 67x67."""
-        wavelengths = np.array([3.5])
+        wavelengths = single_wavelength
         positions = three_hole_mask.compute_splodge_positions(
             wavelengths=wavelengths
         )
@@ -654,11 +639,12 @@ class TestComputeSplodgePositions:
             assert np.all(coords[:, 1] >= 0)
             assert np.all(coords[:, 1] < 67)
 
-    def test_longer_baseline_further_from_center(self, three_hole_mask):
+    def test_longer_baseline_further_from_center(
+        self, three_hole_mask, single_wavelength
+    ):
         """Longer baselines produce splodges further out."""
-        wavelengths = np.array([3.5])
         positions = three_hole_mask.compute_splodge_positions(
-            wavelengths=wavelengths,
+            wavelengths=single_wavelength,
             ny=67,
             nx=67,
         )
@@ -708,24 +694,22 @@ class TestComputeSplodgePositions:
 
         assert dist_short > dist_long
 
-    def test_non_square_frame(self, three_hole_mask):
+    def test_non_square_frame(self, three_hole_mask, single_wavelength):
         """Handles non-square ny != nx."""
-        wavelengths = np.array([3.5])
         positions = three_hole_mask.compute_splodge_positions(
-            wavelengths=wavelengths,
+            wavelengths=single_wavelength,
             ny=63,
             nx=67,
         )
         # Should not crash.
         assert len(positions) == 3
 
-    def test_center_reference(self, three_hole_mask):
+    def test_center_reference(self, three_hole_mask, single_wavelength):
         """Center is at (ny-1)/2, (nx-1)/2."""
-        wavelengths = np.array([3.5])
         # Zero-length baseline would be at center.
         # Use a real baseline and verify direction.
         positions = three_hole_mask.compute_splodge_positions(
-            wavelengths=wavelengths,
+            wavelengths=single_wavelength,
             ny=67,
             nx=67,
         )
@@ -746,33 +730,35 @@ class TestALESPixelScaleConstant:
         """ALES pixel scale is 34.5 mas = 0.0345 arcsec."""
         assert ALES_PIXEL_SCALE_ARCSEC == pytest.approx(0.0345)
 
-    def test_used_as_default(self, three_hole_mask):
+    def test_used_as_default(self, three_hole_mask, single_wavelength):
         """Default pixel scale matches constant."""
         # Calling without pixel_scale should use the
         # constant (verified by not raising).
-        psf = three_hole_mask.compute_synthetic_psf(wavelength=3.5)
+        psf = three_hole_mask.compute_synthetic_psf(
+            wavelength=single_wavelength
+        )
         assert psf.shape == (101, 101)
 
 
 class TestSplodgePositionsConsistency:
     """Cross-validate splodge positions with synthetic PS."""
 
-    def test_splodges_match_power_spectrum_peaks(self, bundled_mask):
+    def test_splodges_match_power_spectrum_peaks(
+        self, bundled_mask, single_wavelength
+    ):
         """Analytical positions match PS peak locations."""
-        wavelength = 3.5
         n_pix = 67
         pixel_scale = ALES_PIXEL_SCALE_ARCSEC
 
         ps = bundled_mask.compute_synthetic_power_spectrum(
-            wavelength=wavelength,
+            wavelength=single_wavelength,
             pixel_scale_arcsec=pixel_scale,
             n_pixels_image=n_pix,
             n_pixels_pupil=501,
         )
 
-        wavelengths = np.array([wavelength])
         positions = bundled_mask.compute_splodge_positions(
-            wavelengths=wavelengths,
+            wavelengths=single_wavelength,
             pixel_scale_arcsec=pixel_scale,
             ny=n_pix,
             nx=n_pix,
@@ -810,56 +796,62 @@ class TestPlotMethods:
         ax = bundled_mask.plot_pupil(n_pixels=101)
         assert ax is not None
 
-    def test_plot_synthetic_psf(self, three_hole_mask):
+    def test_plot_synthetic_psf(self, three_hole_mask, single_wavelength):
         """plot_synthetic_psf runs without error."""
         ax = three_hole_mask.plot_synthetic_psf(
-            wavelength=3.5, n_pixels_image=51
+            wavelength=single_wavelength, n_pixels_image=51
         )
         assert ax is not None
 
-    def test_plot_synthetic_power_spectrum(self, three_hole_mask):
+    def test_plot_synthetic_power_spectrum(
+        self, three_hole_mask, single_wavelength
+    ):
         """plot_synthetic_power_spectrum runs."""
         ax = three_hole_mask.plot_synthetic_power_spectrum(
-            wavelength=3.5, n_pixels_image=51
+            wavelength=single_wavelength, n_pixels_image=51
         )
         assert ax is not None
 
-    def test_plot_power_spectrum_with_baselines_log(self, three_hole_mask):
+    def test_plot_power_spectrum_with_baselines_log(
+        self, three_hole_mask, single_wavelength
+    ):
         """plot_power_spectrum_with_baselines runs."""
         ps = three_hole_mask.compute_synthetic_power_spectrum(
-            wavelength=3.5, n_pixels_image=67
+            wavelength=single_wavelength, n_pixels_image=67
         )
         ax = three_hole_mask.plot_power_spectrum_with_baselines(
             power_spectrum=ps,
-            wavelength=3.5,
+            wavelength=single_wavelength,
         )
         assert ax is not None
 
-    def test_plot_ps_with_baselines_linear(self, three_hole_mask):
+    def test_plot_ps_with_baselines_linear(
+        self, three_hole_mask, single_wavelength
+    ):
         """plot_power_spectrum_with_baselines linear scale."""
         ps = three_hole_mask.compute_synthetic_power_spectrum(
-            wavelength=3.5, n_pixels_image=67
+            wavelength=single_wavelength, n_pixels_image=67
         )
         ax = three_hole_mask.plot_power_spectrum_with_baselines(
             power_spectrum=ps,
-            wavelength=3.5,
+            wavelength=single_wavelength,
             log_scale=False,
         )
         assert ax is not None
 
-    def test_plot_psf_linear_scale(self, three_hole_mask):
+    def test_plot_psf_linear_scale(self, three_hole_mask, single_wavelength):
         """Plot PSF with linear scale."""
         ax = three_hole_mask.plot_synthetic_psf(
-            wavelength=3.5,
+            wavelength=single_wavelength,
             n_pixels_image=51,
             log_scale=False,
         )
         assert ax is not None
 
-    def test_plot_ps_linear_scale(self, three_hole_mask):
+    def test_plot_ps_linear_scale(self, three_hole_mask, single_wavelength):
         """Plot power spectrum with linear scale."""
         ax = three_hole_mask.plot_synthetic_power_spectrum(
-            wavelength=3.5,
+            wavelength=single_wavelength,
             n_pixels_image=51,
             log_scale=False,
         )
