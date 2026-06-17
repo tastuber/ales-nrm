@@ -7,7 +7,6 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 
-from ales_nrm.nrm.mask import Baseline, Hole
 from ales_nrm.observables import Observables
 from ales_nrm.sampy_interface.extract import (
     _ensure_trailing_sep,
@@ -598,48 +597,6 @@ class TestExtractObservables:
 
 
 @pytest.fixture()
-def sampy_mock_mask():
-    """Create a mock NRMMask with 3 holes (3 baselines, 1 triangle)."""
-    mask = MagicMock()
-    mask.holes = [
-        Hole(name="H1", x=0.0, y=1.0, radius=0.25),
-        Hole(name="H2", x=1.0, y=0.0, radius=0.25),
-        Hole(name="H3", x=-1.0, y=0.0, radius=0.25),
-    ]
-    mask.baselines = [
-        Baseline(
-            name="H1H2",
-            hole1="H1",
-            hole2="H2",
-            bx=1.0,
-            by=-1.0,
-            length=np.sqrt(2),
-        ),
-        Baseline(
-            name="H1H3",
-            hole1="H1",
-            hole2="H3",
-            bx=-1.0,
-            by=-1.0,
-            length=np.sqrt(2),
-        ),
-        Baseline(
-            name="H2H3",
-            hole1="H2",
-            hole2="H3",
-            bx=-2.0,
-            by=0.0,
-            length=2.0,
-        ),
-    ]
-    mask.get_closing_triangles.return_value = [
-        ("H1H2", "H2H3", "H1H3"),
-    ]
-    mask.source_name = "test_mask_3hole"
-    return mask
-
-
-@pytest.fixture()
 def sampy_mock_block():
     """Create a mock ObservingBlock for build_observables_from_sampy."""
     block = MagicMock()
@@ -771,199 +728,199 @@ class TestBuildObservablesFromSampy:
     """Tests for build_observables_from_sampy."""
 
     def test_returns_observables(
-        self, sampy_mock_block, sampy_mock_mask, sampy_extracted_full
+        self, sampy_mock_block, three_hole_mask, sampy_extracted_full
     ):
         """Returns an Observables instance."""
         obs = build_observables_from_sampy(
             sampy_mock_block,
-            sampy_mock_mask,
+            three_hole_mask,
             sampy_extracted_full,
         )
         assert isinstance(obs, Observables)
 
     def test_extraction_backend_set(
-        self, sampy_mock_block, sampy_mock_mask, sampy_extracted_full
+        self, sampy_mock_block, three_hole_mask, sampy_extracted_full
     ):
         """extraction_backend is set to 'sampy'."""
         obs = build_observables_from_sampy(
             sampy_mock_block,
-            sampy_mock_mask,
+            three_hole_mask,
             sampy_extracted_full,
         )
         assert obs.extraction_backend == "sampy"
 
     def test_vis2_shape(
-        self, sampy_mock_block, sampy_mock_mask, sampy_extracted_full
+        self, sampy_mock_block, three_hole_mask, sampy_extracted_full
     ):
         """vis2 has shape (n_baselines, n_wav)."""
         obs = build_observables_from_sampy(
             sampy_mock_block,
-            sampy_mock_mask,
+            three_hole_mask,
             sampy_extracted_full,
         )
         assert obs.vis2.shape == (3, 3)
 
     def test_vis2_values(
-        self, sampy_mock_block, sampy_mock_mask, sampy_extracted_full
+        self, sampy_mock_block, three_hole_mask, sampy_extracted_full
     ):
         """vis2 contains correct values from SAMpy result."""
         obs = build_observables_from_sampy(
             sampy_mock_block,
-            sampy_mock_mask,
+            three_hole_mask,
             sampy_extracted_full,
         )
         np.testing.assert_allclose(obs.vis2, 0.9)
 
     def test_vis2_err_values(
-        self, sampy_mock_block, sampy_mock_mask, sampy_extracted_full
+        self, sampy_mock_block, three_hole_mask, sampy_extracted_full
     ):
         """vis2_err contains std_error from SAMpy."""
         obs = build_observables_from_sampy(
             sampy_mock_block,
-            sampy_mock_mask,
+            three_hole_mask,
             sampy_extracted_full,
         )
         np.testing.assert_allclose(obs.vis2_err, 0.05)
 
     def test_vis2_flag_all_false(
-        self, sampy_mock_block, sampy_mock_mask, sampy_extracted_full
+        self, sampy_mock_block, three_hole_mask, sampy_extracted_full
     ):
         """vis2_flag is all False (valid data)."""
         obs = build_observables_from_sampy(
             sampy_mock_block,
-            sampy_mock_mask,
+            three_hole_mask,
             sampy_extracted_full,
         )
         assert not np.any(obs.vis2_flag)
 
     def test_t3phi_shape(
-        self, sampy_mock_block, sampy_mock_mask, sampy_extracted_full
+        self, sampy_mock_block, three_hole_mask, sampy_extracted_full
     ):
         """t3phi has shape (n_triangles, n_wav)."""
         obs = build_observables_from_sampy(
             sampy_mock_block,
-            sampy_mock_mask,
+            three_hole_mask,
             sampy_extracted_full,
         )
         assert obs.t3phi.shape == (1, 3)
 
     def test_t3phi_values(
-        self, sampy_mock_block, sampy_mock_mask, sampy_extracted_full
+        self, sampy_mock_block, three_hole_mask, sampy_extracted_full
     ):
         """t3phi contains closure_phases from SAMpy."""
         obs = build_observables_from_sampy(
             sampy_mock_block,
-            sampy_mock_mask,
+            three_hole_mask,
             sampy_extracted_full,
         )
         np.testing.assert_allclose(obs.t3phi, 10.0)
 
     def test_t3phi_err_values(
-        self, sampy_mock_block, sampy_mock_mask, sampy_extracted_full
+        self, sampy_mock_block, three_hole_mask, sampy_extracted_full
     ):
         """t3phi_err contains std_error from SAMpy CP result."""
         obs = build_observables_from_sampy(
             sampy_mock_block,
-            sampy_mock_mask,
+            three_hole_mask,
             sampy_extracted_full,
         )
         np.testing.assert_allclose(obs.t3phi_err, 2.0)
 
     def test_t3amp_values(
-        self, sampy_mock_block, sampy_mock_mask, sampy_extracted_full
+        self, sampy_mock_block, three_hole_mask, sampy_extracted_full
     ):
         """t3amp contains triple_amps from SAMpy."""
         obs = build_observables_from_sampy(
             sampy_mock_block,
-            sampy_mock_mask,
+            three_hole_mask,
             sampy_extracted_full,
         )
         np.testing.assert_allclose(obs.t3amp, 0.8)
 
     def test_t3amp_err_is_nan(
-        self, sampy_mock_block, sampy_mock_mask, sampy_extracted_full
+        self, sampy_mock_block, three_hole_mask, sampy_extracted_full
     ):
         """t3amp_err is all NaN (not provided by SAMpy)."""
         obs = build_observables_from_sampy(
             sampy_mock_block,
-            sampy_mock_mask,
+            three_hole_mask,
             sampy_extracted_full,
         )
         assert np.all(np.isnan(obs.t3amp_err))
 
     def test_t3_flag_all_false(
-        self, sampy_mock_block, sampy_mock_mask, sampy_extracted_full
+        self, sampy_mock_block, three_hole_mask, sampy_extracted_full
     ):
         """t3_flag is all False (valid data)."""
         obs = build_observables_from_sampy(
             sampy_mock_block,
-            sampy_mock_mask,
+            three_hole_mask,
             sampy_extracted_full,
         )
         assert not np.any(obs.t3_flag)
 
     def test_visamp_values(
-        self, sampy_mock_block, sampy_mock_mask, sampy_extracted_full
+        self, sampy_mock_block, three_hole_mask, sampy_extracted_full
     ):
         """Visamp contains amplitudes from SAMpy calc_cvis."""
         obs = build_observables_from_sampy(
             sampy_mock_block,
-            sampy_mock_mask,
+            three_hole_mask,
             sampy_extracted_full,
         )
         np.testing.assert_allclose(obs.visamp, 0.95)
 
     def test_visphi_values(
-        self, sampy_mock_block, sampy_mock_mask, sampy_extracted_full
+        self, sampy_mock_block, three_hole_mask, sampy_extracted_full
     ):
         """Visphi contains phases from SAMpy calc_cvis."""
         obs = build_observables_from_sampy(
             sampy_mock_block,
-            sampy_mock_mask,
+            three_hole_mask,
             sampy_extracted_full,
         )
         np.testing.assert_allclose(obs.visphi, 5.0)
 
     def test_visamp_err_is_nan(
-        self, sampy_mock_block, sampy_mock_mask, sampy_extracted_full
+        self, sampy_mock_block, three_hole_mask, sampy_extracted_full
     ):
         """visamp_err is all NaN (not provided by SAMpy)."""
         obs = build_observables_from_sampy(
             sampy_mock_block,
-            sampy_mock_mask,
+            three_hole_mask,
             sampy_extracted_full,
         )
         assert np.all(np.isnan(obs.visamp_err))
 
     def test_visphi_err_is_nan(
-        self, sampy_mock_block, sampy_mock_mask, sampy_extracted_full
+        self, sampy_mock_block, three_hole_mask, sampy_extracted_full
     ):
         """visphi_err is all NaN (not provided by SAMpy)."""
         obs = build_observables_from_sampy(
             sampy_mock_block,
-            sampy_mock_mask,
+            three_hole_mask,
             sampy_extracted_full,
         )
         assert np.all(np.isnan(obs.visphi_err))
 
     def test_vis_flag_all_false(
-        self, sampy_mock_block, sampy_mock_mask, sampy_extracted_full
+        self, sampy_mock_block, three_hole_mask, sampy_extracted_full
     ):
         """vis_flag is all False (valid data)."""
         obs = build_observables_from_sampy(
             sampy_mock_block,
-            sampy_mock_mask,
+            three_hole_mask,
             sampy_extracted_full,
         )
         assert not np.any(obs.vis_flag)
 
     def test_cp_only_extraction(
-        self, sampy_mock_block, sampy_mock_mask, sampy_extracted_cp_only
+        self, sampy_mock_block, three_hole_mask, sampy_extracted_cp_only
     ):
         """Only CP arrays set when only CP is extracted."""
         obs = build_observables_from_sampy(
             sampy_mock_block,
-            sampy_mock_mask,
+            three_hole_mask,
             sampy_extracted_cp_only,
         )
         assert obs.has_t3phi
@@ -973,12 +930,12 @@ class TestBuildObservablesFromSampy:
         assert not obs.has_visphi
 
     def test_vis2_only_extraction(
-        self, sampy_mock_block, sampy_mock_mask, sampy_extracted_vis2_only
+        self, sampy_mock_block, three_hole_mask, sampy_extracted_vis2_only
     ):
         """Only VIS2 arrays set when only VIS2 is extracted."""
         obs = build_observables_from_sampy(
             sampy_mock_block,
-            sampy_mock_mask,
+            three_hole_mask,
             sampy_extracted_vis2_only,
         )
         assert obs.has_vis2
@@ -986,12 +943,12 @@ class TestBuildObservablesFromSampy:
         assert not obs.has_visamp
 
     def test_cvis_only_extraction(
-        self, sampy_mock_block, sampy_mock_mask, sampy_extracted_cvis_only
+        self, sampy_mock_block, three_hole_mask, sampy_extracted_cvis_only
     ):
         """Only visamp, visphi set when only compl_vis in extracted."""
         obs = build_observables_from_sampy(
             sampy_mock_block,
-            sampy_mock_mask,
+            three_hole_mask,
             sampy_extracted_cvis_only,
         )
         assert obs.has_visamp
@@ -1000,7 +957,7 @@ class TestBuildObservablesFromSampy:
         assert not obs.has_t3phi
 
     def test_std_error_none_leaves_nan(
-        self, sampy_mock_block, sampy_mock_mask
+        self, sampy_mock_block, three_hole_mask
     ):
         """When SAMpy std_error is None, error arrays remain NaN."""
         n_bl = 3
@@ -1037,25 +994,25 @@ class TestBuildObservablesFromSampy:
 
         obs = build_observables_from_sampy(
             sampy_mock_block,
-            sampy_mock_mask,
+            three_hole_mask,
             extracted,
         )
         assert np.all(np.isnan(obs.t3phi_err))
         assert np.all(np.isnan(obs.vis2_err))
 
     def test_validates_after_build(
-        self, sampy_mock_block, sampy_mock_mask, sampy_extracted_full
+        self, sampy_mock_block, three_hole_mask, sampy_extracted_full
     ):
         """Built Observables passes validate."""
         obs = build_observables_from_sampy(
             sampy_mock_block,
-            sampy_mock_mask,
+            three_hole_mask,
             sampy_extracted_full,
         )
         obs.validate()
 
     def test_wavelength_column_mapping_vis2(
-        self, sampy_mock_block, sampy_mock_mask
+        self, sampy_mock_block, three_hole_mask
     ):
         """Each wavelength maps to the correct column for VIS2."""
         n_bl = 3
@@ -1078,7 +1035,7 @@ class TestBuildObservablesFromSampy:
         extracted = {"wavelengths": wavelengths, "vis2": vis2_dict}
         obs = build_observables_from_sampy(
             sampy_mock_block,
-            sampy_mock_mask,
+            three_hole_mask,
             extracted,
         )
 
@@ -1087,7 +1044,7 @@ class TestBuildObservablesFromSampy:
         np.testing.assert_allclose(obs.vis2[:, 2], 0.3)
 
     def test_wavelength_column_mapping_cp(
-        self, sampy_mock_block, sampy_mock_mask
+        self, sampy_mock_block, three_hole_mask
     ):
         """Each wavel. maps to the correct column for closure phases."""
         n_tri = 1
@@ -1107,7 +1064,7 @@ class TestBuildObservablesFromSampy:
         extracted = {"wavelengths": wavelengths, "cp": cp_dict}
         obs = build_observables_from_sampy(
             sampy_mock_block,
-            sampy_mock_mask,
+            three_hole_mask,
             extracted,
         )
 
@@ -1119,7 +1076,7 @@ class TestBuildObservablesFromSampy:
         np.testing.assert_allclose(obs.t3amp[:, 2], 0.3)
 
     def test_wavelength_column_mapping_cvis(
-        self, sampy_mock_block, sampy_mock_mask
+        self, sampy_mock_block, three_hole_mask
     ):
         """Each wavel. maps to the correct column for complex vis."""
         n_bl = 3
@@ -1139,7 +1096,7 @@ class TestBuildObservablesFromSampy:
         extracted = {"wavelengths": wavelengths, "compl_vis": cvis_dict}
         obs = build_observables_from_sampy(
             sampy_mock_block,
-            sampy_mock_mask,
+            three_hole_mask,
             extracted,
         )
 
@@ -1151,23 +1108,23 @@ class TestBuildObservablesFromSampy:
         np.testing.assert_allclose(obs.visphi[:, 2], 15.0)
 
     def test_visamp_shape(
-        self, sampy_mock_block, sampy_mock_mask, sampy_extracted_full
+        self, sampy_mock_block, three_hole_mask, sampy_extracted_full
     ):
         """Visamp has shape (n_baselines, n_wav)."""
         obs = build_observables_from_sampy(
             sampy_mock_block,
-            sampy_mock_mask,
+            three_hole_mask,
             sampy_extracted_full,
         )
         assert obs.visamp.shape == (3, 3)
 
     def test_visphi_shape(
-        self, sampy_mock_block, sampy_mock_mask, sampy_extracted_full
+        self, sampy_mock_block, three_hole_mask, sampy_extracted_full
     ):
         """Visphi has shape (n_baselines, n_wav)."""
         obs = build_observables_from_sampy(
             sampy_mock_block,
-            sampy_mock_mask,
+            three_hole_mask,
             sampy_extracted_full,
         )
         assert obs.visphi.shape == (3, 3)

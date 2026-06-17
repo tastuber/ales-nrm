@@ -7,7 +7,6 @@ import pytest
 
 from ales_nrm.nrm.mask import (
     ALES_PIXEL_SCALE_ARCSEC,
-    NRMMask,
 )
 from ales_nrm.nrm.mask_rotation import (
     _compute_angle_from_centroids,
@@ -17,30 +16,6 @@ from ales_nrm.nrm.mask_rotation import (
     find_mask_rotation_angle,
 )
 from ales_nrm.utilities import rotate_points_2d
-
-
-@pytest.fixture()
-def bundled_mask():
-    """Load the bundled LBTI NRM6 SX mask."""
-    return NRMMask.from_bundled("lbti_nrm6_sx")
-
-
-@pytest.fixture()
-def three_hole_mask():
-    """Create a simple 3-hole mask for testing."""
-    from ales_nrm.nrm.mask import Hole
-
-    holes = [
-        Hole("H1", -1.0, 0.0, 0.4),
-        Hole("H2", 1.0, 0.0, 0.4),
-        Hole("H3", 0.0, 1.5, 0.4),
-    ]
-    mask = NRMMask(
-        primary_diameter=8.4,
-        holes=holes,
-    )
-    mask._compute_baselines()
-    return mask
 
 
 class TestSamplePowerAtPositions:

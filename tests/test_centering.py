@@ -12,12 +12,6 @@ from ales_nrm.centering import (
 )
 
 
-@pytest.fixture()
-def rng():
-    """Seeded random number generator."""
-    return np.random.default_rng(seed=42)
-
-
 def _make_gaussian_image(
     ny,
     nx,
