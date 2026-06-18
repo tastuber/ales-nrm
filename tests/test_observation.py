@@ -2,10 +2,13 @@
 
 import datetime
 import warnings
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
+from astropy.io import fits
 
+from ales_nrm.observables import Observables
 from ales_nrm.observation import (
     BlockType,
     ObservingBlock,
@@ -824,7 +827,6 @@ class TestHeaderMetadata:
         """Warn and use NaN when LBT_PARA is missing."""
         filepath = tmp_path / "cube_lm_251108_006001.fits"
         write_test_cube(filepath, sample_cube, sample_wavelengths)
-        from astropy.io import fits
 
         with fits.open(filepath, mode="update") as hdul:
             del hdul[0].header["LBT_PARA"]
@@ -846,7 +848,6 @@ class TestHeaderMetadata:
         """Warn and use NaN when LBT_ALT is missing."""
         filepath = tmp_path / "cube_lm_251108_006001.fits"
         write_test_cube(filepath, sample_cube, sample_wavelengths)
-        from astropy.io import fits
 
         with fits.open(filepath, mode="update") as hdul:
             del hdul[0].header["LBT_ALT"]
@@ -868,7 +869,6 @@ class TestHeaderMetadata:
         """Warn and use empty string when TIME-OBS missing."""
         filepath = tmp_path / "cube_lm_251108_006001.fits"
         write_test_cube(filepath, sample_cube, sample_wavelengths)
-        from astropy.io import fits
 
         with fits.open(filepath, mode="update") as hdul:
             del hdul[0].header["TIME-OBS"]
@@ -941,7 +941,6 @@ class TestHeaderMetadata:
                     "LBT_ALT": 70.0,
                 },
             )
-        from astropy.io import fits
 
         fp2 = tmp_path / "cube_lm_251108_007002.fits"
         with fits.open(fp2, mode="update") as hdul:
@@ -973,7 +972,6 @@ class TestHeaderMetadata:
                 sample_wavelengths,
                 extra_header={"TIME-OBS": "10:00:00.000"},
             )
-        from astropy.io import fits
 
         fp2 = tmp_path / "cube_lm_251108_007002.fits"
         with fits.open(fp2, mode="update") as hdul:
@@ -1002,7 +1000,6 @@ class TestHeaderMetadata:
                 sample_cube,
                 sample_wavelengths,
             )
-        from astropy.io import fits
 
         for num in [7001, 7002]:
             fp = tmp_path / f"cube_lm_251108_{num:06d}.fits"
@@ -1728,3 +1725,373 @@ class TestObservationDate:
                 file_range=(5001, 5003),
                 observation_date=datetime.datetime(2024, 11, 8, 12, 30),
             )
+
+
+class TestExtractObservables:
+    """Tests for ObservingBlock.extract_observables."""
+
+    def test_not_loaded_raises_runtime_error(self, sci_block):
+        """Raise RuntimeError if block is not loaded."""
+        mask = MagicMock()
+        with pytest.raises(RuntimeError, match="not been loaded"):
+            sci_block.extract_observables(mask=mask)
+
+    def test_unknown_backend_raises_value_error(self, sci_block):
+        """Raise ValueError for unrecognized backend."""
+        mask = MagicMock()
+        sci_block.load()
+        with pytest.raises(ValueError, match="Unknown extraction backend"):
+            sci_block.extract_observables(mask=mask, backend="nonexistent")
+
+    def test_sampy_backend_stores_observables(self, sci_block):
+        """Extraction stores Observables under the given label."""
+        mask = MagicMock()
+        mock_obs = MagicMock(spec=Observables)
+        mock_raw = {"wavelengths": np.array([3.0]), "cp": {}}
+
+        with (
+            patch(
+                "ales_nrm.sampy_interface.extract.extract_observables",
+                return_value=mock_raw,
+            ) as mock_extract,
+            patch(
+                "ales_nrm.sampy_interface.extract.build_observables_from_sampy",
+                return_value=mock_obs,
+            ) as mock_build,
+        ):
+            sci_block.load()
+            sci_block.extract_observables(
+                mask=mask, label="raw", backend="sampy", mask_dirs={}
+            )
+
+        assert "raw" in sci_block.observables
+        assert sci_block.observables["raw"] is mock_obs
+        mock_extract.assert_called_once()
+        mock_build.assert_called_once_with(sci_block, mask, mock_raw)
+
+    def test_raw_extraction_stored_under_label(self, sci_block):
+        """Raw extraction dict stored under label key."""
+        mask = MagicMock()
+        mock_obs = MagicMock(spec=Observables)
+        mock_raw = {"wavelengths": np.array([3.5]), "vis2": {3.5: {}}}
+
+        with (
+            patch(
+                "ales_nrm.sampy_interface.extract.extract_observables",
+                return_value=mock_raw,
+            ),
+            patch(
+                "ales_nrm.sampy_interface.extract.build_observables_from_sampy",
+                return_value=mock_obs,
+            ),
+        ):
+            sci_block.load()
+            sci_block.extract_observables(mask=mask, mask_dirs={})
+
+        assert sci_block._raw_extraction is not None
+        assert "raw" in sci_block._raw_extraction
+        assert sci_block._raw_extraction["raw"]["backend"] == "sampy"
+        assert sci_block._raw_extraction["raw"]["result"] is mock_raw
+
+    def test_raw_extraction_custom_label(self, sci_block):
+        """Raw extraction stored under custom label."""
+        mask = MagicMock()
+        mock_obs = MagicMock(spec=Observables)
+        mock_raw = {"wavelengths": np.array([3.5])}
+
+        with (
+            patch(
+                "ales_nrm.sampy_interface.extract.extract_observables",
+                return_value=mock_raw,
+            ),
+            patch(
+                "ales_nrm.sampy_interface.extract.build_observables_from_sampy",
+                return_value=mock_obs,
+            ),
+        ):
+            sci_block.load()
+            sci_block.extract_observables(
+                mask=mask, label="my_extract", mask_dirs={}
+            )
+
+        assert "my_extract" in sci_block._raw_extraction
+        assert sci_block._raw_extraction["my_extract"]["backend"] == "sampy"
+        assert sci_block._raw_extraction["my_extract"]["result"] is mock_raw
+
+    def test_raw_extraction_multiple_labels_coexist(self, sci_block):
+        """Multiple raw extractions stored under different labels."""
+        mask = MagicMock()
+        mock_obs = MagicMock(spec=Observables)
+        mock_raw_1 = {"wavelengths": np.array([3.0])}
+        mock_raw_2 = {"wavelengths": np.array([4.0])}
+
+        sci_block.load()
+
+        with (
+            patch(
+                "ales_nrm.sampy_interface.extract.extract_observables",
+                return_value=mock_raw_1,
+            ),
+            patch(
+                "ales_nrm.sampy_interface.extract.build_observables_from_sampy",
+                return_value=mock_obs,
+            ),
+        ):
+            sci_block.extract_observables(
+                mask=mask, label="first", mask_dirs={}
+            )
+
+        with (
+            patch(
+                "ales_nrm.sampy_interface.extract.extract_observables",
+                return_value=mock_raw_2,
+            ),
+            patch(
+                "ales_nrm.sampy_interface.extract.build_observables_from_sampy",
+                return_value=mock_obs,
+            ),
+        ):
+            sci_block.extract_observables(
+                mask=mask, label="second", mask_dirs={}
+            )
+
+        assert sci_block._raw_extraction["first"]["result"] is mock_raw_1
+        assert sci_block._raw_extraction["second"]["result"] is mock_raw_2
+        assert sci_block._raw_extraction["first"]["backend"] == "sampy"
+        assert sci_block._raw_extraction["second"]["backend"] == "sampy"
+
+    def test_custom_label(self, sci_block):
+        """Observables stored under custom label."""
+        mask = MagicMock()
+        mock_obs = MagicMock(spec=Observables)
+        mock_raw = {"wavelengths": np.array([3.5])}
+
+        with (
+            patch(
+                "ales_nrm.sampy_interface.extract.extract_observables",
+                return_value=mock_raw,
+            ),
+            patch(
+                "ales_nrm.sampy_interface.extract.build_observables_from_sampy",
+                return_value=mock_obs,
+            ),
+        ):
+            sci_block.load()
+            sci_block.extract_observables(
+                mask=mask, label="my_label", mask_dirs={}
+            )
+
+        assert "my_label" in sci_block.observables
+        assert sci_block.observables["my_label"] is mock_obs
+
+    def test_multiple_labels_coexist(self, sci_block):
+        """Multiple extractions under different labels coexist."""
+        mask = MagicMock()
+        mock_obs_1 = MagicMock(spec=Observables)
+        mock_obs_2 = MagicMock(spec=Observables)
+        mock_raw = {"wavelengths": np.array([3.5])}
+
+        sci_block.load()
+
+        with (
+            patch(
+                "ales_nrm.sampy_interface.extract.extract_observables",
+                return_value=mock_raw,
+            ),
+            patch(
+                "ales_nrm.sampy_interface.extract.build_observables_from_sampy",
+                return_value=mock_obs_1,
+            ),
+        ):
+            sci_block.extract_observables(
+                mask=mask, label="first", mask_dirs={}
+            )
+
+        with (
+            patch(
+                "ales_nrm.sampy_interface.extract.extract_observables",
+                return_value=mock_raw,
+            ),
+            patch(
+                "ales_nrm.sampy_interface.extract.build_observables_from_sampy",
+                return_value=mock_obs_2,
+            ),
+        ):
+            sci_block.extract_observables(
+                mask=mask, label="second", mask_dirs={}
+            )
+
+        assert sci_block.observables["first"] is mock_obs_1
+        assert sci_block.observables["second"] is mock_obs_2
+
+    def test_backend_kwargs_forwarded(self, sci_block, single_wavelength):
+        """Backend kwargs are forwarded to extract_observables."""
+        mask = MagicMock()
+        mock_obs = MagicMock(spec=Observables)
+        mock_raw = {"wavelengths": np.array([single_wavelength])}
+
+        with (
+            patch(
+                "ales_nrm.sampy_interface.extract.extract_observables",
+                return_value=mock_raw,
+            ) as mock_extract,
+            patch(
+                "ales_nrm.sampy_interface.extract.build_observables_from_sampy",
+                return_value=mock_obs,
+            ),
+        ):
+            sci_block.load()
+            sci_block.extract_observables(
+                mask=mask,
+                mask_dirs={"key": "val"},
+                nx=256,
+                display=True,
+            )
+
+        call_kwargs = mock_extract.call_args[1]
+        assert call_kwargs["mask_dirs"] == {"key": "val"}
+        assert call_kwargs["nx"] == 256
+        assert call_kwargs["display"] is True
+
+    def test_observables_dict_empty_by_default(self, sci_block):
+        """Observables dict is empty before extraction."""
+        assert sci_block.observables == {}
+
+    def test_raw_extraction_none_by_default(self, sci_block):
+        """_raw_extraction is None before extraction."""
+        assert sci_block._raw_extraction is None
+
+
+class TestExtractAllObservables:
+    """Tests for ObservingSequence.extract_all_observables."""
+
+    def test_extracts_all_loaded_blocks(self, sci_block, cal_block):
+        """Extracts observables for all loaded blocks."""
+        mask = MagicMock()
+        mock_obs = MagicMock(spec=Observables)
+        mock_raw = {"wavelengths": np.array([3.5])}
+
+        seq = ObservingSequence(blocks=[sci_block, cal_block], name="test")
+        seq.load_all()
+
+        with (
+            patch(
+                "ales_nrm.sampy_interface.extract.extract_observables",
+                return_value=mock_raw,
+            ),
+            patch(
+                "ales_nrm.sampy_interface.extract.build_observables_from_sampy",
+                return_value=mock_obs,
+            ),
+        ):
+            seq.extract_all_observables(mask=mask, mask_dirs={})
+
+        for block in seq:
+            assert "raw" in block.observables
+
+    def test_skips_unloaded_blocks(self, sci_block, cal_block):
+        """Skips blocks that are not loaded."""
+        mask = MagicMock()
+        mock_obs = MagicMock(spec=Observables)
+        mock_raw = {"wavelengths": np.array([3.5])}
+
+        sci_block.load()
+        # cal_block not loaded
+        seq = ObservingSequence(blocks=[sci_block, cal_block], name="test")
+
+        with (
+            patch(
+                "ales_nrm.sampy_interface.extract.extract_observables",
+                return_value=mock_raw,
+            ),
+            patch(
+                "ales_nrm.sampy_interface.extract.build_observables_from_sampy",
+                return_value=mock_obs,
+            ),
+        ):
+            seq.extract_all_observables(mask=mask, mask_dirs={})
+
+        assert "raw" in sci_block.observables
+        assert "raw" not in cal_block.observables
+
+    def test_skips_existing_label(self, sci_block):
+        """Skips blocks that already have the given label."""
+        mask = MagicMock()
+        mock_obs = MagicMock(spec=Observables)
+        mock_raw = {"wavelengths": np.array([3.5])}
+
+        sci_block.load()
+        seq = ObservingSequence(blocks=[sci_block], name="test")
+
+        with (
+            patch(
+                "ales_nrm.sampy_interface.extract.extract_observables",
+                return_value=mock_raw,
+            ) as mock_extract,
+            patch(
+                "ales_nrm.sampy_interface.extract.build_observables_from_sampy",
+                return_value=mock_obs,
+            ),
+        ):
+            seq.extract_all_observables(mask=mask, mask_dirs={})
+            assert mock_extract.call_count == 1
+
+            # Second call with same label should not extract again
+            seq.extract_all_observables(mask=mask, mask_dirs={})
+            assert mock_extract.call_count == 1
+
+    def test_custom_label_and_backend(self, sci_block):
+        """Passes label and backend to each block."""
+        mask = MagicMock()
+        mock_obs = MagicMock(spec=Observables)
+        mock_raw = {"wavelengths": np.array([3.5])}
+
+        sci_block.load()
+        seq = ObservingSequence(blocks=[sci_block], name="test")
+
+        with (
+            patch(
+                "ales_nrm.sampy_interface.extract.extract_observables",
+                return_value=mock_raw,
+            ),
+            patch(
+                "ales_nrm.sampy_interface.extract.build_observables_from_sampy",
+                return_value=mock_obs,
+            ),
+        ):
+            seq.extract_all_observables(
+                mask=mask,
+                label="custom",
+                backend="sampy",
+                mask_dirs={},
+            )
+
+        assert "custom" in sci_block.observables
+
+    def test_different_labels_both_extracted(self, sci_block):
+        """Different labels trigger separate extractions."""
+        mask = MagicMock()
+        mock_obs = MagicMock(spec=Observables)
+        mock_raw = {"wavelengths": np.array([3.5])}
+
+        sci_block.load()
+        seq = ObservingSequence(blocks=[sci_block], name="test")
+
+        with (
+            patch(
+                "ales_nrm.sampy_interface.extract.extract_observables",
+                return_value=mock_raw,
+            ) as mock_extract,
+            patch(
+                "ales_nrm.sampy_interface.extract.build_observables_from_sampy",
+                return_value=mock_obs,
+            ),
+        ):
+            seq.extract_all_observables(mask=mask, label="first", mask_dirs={})
+            seq.extract_all_observables(
+                mask=mask, label="second", mask_dirs={}
+            )
+            assert mock_extract.call_count == 2
+
+        assert "first" in sci_block.observables
+        assert "second" in sci_block.observables
