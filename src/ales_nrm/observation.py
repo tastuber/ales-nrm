@@ -13,11 +13,16 @@ import logging
 import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from astropy.io import fits
 
 from ales_nrm.io.read_fits import read_cubes
+
+if TYPE_CHECKING:
+    from ales_nrm.nrm.mask import NRMMask
+    from ales_nrm.observables import Observables
 
 logger = logging.getLogger(__name__)
 
@@ -233,6 +238,13 @@ class ObservingBlock:
         repr=False,
     )
     timestamps: np.ndarray | None = field(
+        default=None,
+        repr=False,
+    )
+    observables: "dict[str, Observables]" = field(
+        default_factory=dict, repr=False
+    )
+    _raw_extraction: dict[str, dict[str, str | dict]] | None = field(
         default=None,
         repr=False,
     )
@@ -879,6 +891,97 @@ class ObservingBlock:
                 self.power_spectra.shape,
             )
 
+    def extract_observables(
+        self,
+        mask: "NRMMask",
+        label: str = "raw",
+        backend: str = "sampy",
+        **backend_kwargs: Any,
+    ) -> None:
+        """Extract interferometric observables.
+
+        Dispatches to the appropriate extraction backend, populates an
+        ``Observables`` instance, and stores it in
+        ``self.observables[label]``. The raw backend result is stored in
+        ``self._raw_extraction[label][result]`` while the backend is
+        identified via ``self._raw_extraction[label][backend]``.
+
+        Multiple extractions can coexist under different labels
+        (e.g., ``'raw'``, ``'calibrated'``, ``calibrated_method1).
+
+        Args:
+            mask: NRMMask instance providing hole geometry for
+                baseline/triangle construction and station definitions.
+            label: Key under which to store the resulting
+                ``Observables`` in ``self.observables``.
+                Default is ``'raw'``.
+            backend: Extraction backend name. Currently
+                supported: ``'sampy'``.
+            **backend_kwargs: Backend-specific keyword arguments passed
+                directly to the backend extraction function.
+
+        Backend-specific kwargs for ``backend='sampy'``:
+            mask_dirs (dict[float, Path]): Required. Mapping
+                wavelength (µm) → SAMpy mask coordinate directory.
+                Typically the return value of ``setup_sampy_coords``.
+            extract_cp (bool): Extract closure phases. Default True.
+            extract_vis2 (bool): Extract squared visibilities.
+                Default True.
+            extract_compl_vis (bool): Extract complex visibilities.
+                Default True.
+            wl_indices (tuple[int, int] | None): Slice of wavelength
+                channels (start inclusive, stop exclusive).
+                Default None (all).
+            nx (int): FFT grid x-size for SAMpy. Default 501.
+            ny (int): FFT grid y-size for SAMpy. Default 501.
+            display (bool): Show SAMpy diagnostic plots. Default False.
+
+        Raises:
+            RuntimeError: If data has not been loaded.
+            ValueError: If backend is not recognized.
+        """
+        if not self.is_loaded:
+            raise RuntimeError(
+                f"Block '{self.target}' "
+                f"({self.block_type.value}) has not been "
+                f"loaded. Call load() first."
+            )
+
+        if backend == "sampy":
+            from ales_nrm.sampy_interface.extract import (
+                build_observables_from_sampy,
+            )
+            from ales_nrm.sampy_interface.extract import (
+                extract_observables as _sampy_extract,
+            )
+
+            raw_result = _sampy_extract(self, **backend_kwargs)
+            obs = build_observables_from_sampy(self, mask, raw_result)
+        else:
+            raise ValueError(
+                f"Unknown extraction backend '{backend}'. Supported: 'sampy'."
+            )
+
+        # Store raw result for investigative access
+        if self._raw_extraction is None:
+            self._raw_extraction = {}
+        self._raw_extraction[label] = {
+            "backend": backend,
+            "result": raw_result,
+        }
+
+        # Store Observables under label
+        self.observables[label] = obs
+
+        logger.info(
+            "Extracted observables for %s block '%s' "
+            "stored under label '%s' (backend='%s').",
+            self.block_type.value,
+            self.target,
+            label,
+            backend,
+        )
+
 
 @dataclass
 class ObservingSequence:
@@ -1075,6 +1178,69 @@ class ObservingSequence:
                 continue
             if block.power_spectra is None:
                 block.compute_power_spectra(n_fft=n_fft)
+
+    def extract_all_observables(
+        self,
+        mask: "NRMMask",
+        label: str = "raw",
+        backend: str = "sampy",
+        **backend_kwargs: Any,
+    ) -> None:
+        """Extract observables for all loaded blocks.
+
+        Iterates over all blocks and calls ``extract_observables()`` on
+        each loaded block that does not already have an entry under the
+        given label.
+
+        Args:
+            mask: NRMMask instance providing hole geometry.
+            label: Key under which to store each block's
+                ``Observables``. Default is ``'raw'``.
+            backend: Extraction backend name. Currently
+                supported: ``'sampy'``.
+            **backend_kwargs: Backend-specific keyword arguments passed
+                to each block's ``extract_observables()`` method.
+
+        Backend-specific kwargs for ``backend='sampy'``:
+            mask_dirs (dict[float, Path]): Required. Mapping
+                wavelength (µm) → SAMpy mask coordinate directory.
+            extract_cp (bool): Default True.
+            extract_vis2 (bool): Default True.
+            extract_compl_vis (bool): Default True.
+            wl_indices (tuple[int, int] | None): Default None (all).
+            nx (int): Default 501.
+            ny (int): Default 501.
+            display (bool): Default False.
+        """
+        logger.info(
+            "Extracting observables for all %d blocks "
+            "in sequence '%s' (label='%s', "
+            "backend='%s').",
+            len(self.blocks),
+            self.name,
+            label,
+            backend,
+        )
+        for block in self.blocks:
+            if not block.is_loaded:
+                logger.warning(
+                    "Skipping unloaded block '%s'.",
+                    block.target,
+                )
+                continue
+            if label in block.observables:
+                logger.info(
+                    "Skipping block '%s': label '%s' already exists.",
+                    block.target,
+                    label,
+                )
+                continue
+            block.extract_observables(
+                mask=mask,
+                label=label,
+                backend=backend,
+                **backend_kwargs,
+            )
 
     def __len__(self) -> int:
         """Return the number of blocks."""
