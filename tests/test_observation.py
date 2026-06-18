@@ -330,6 +330,68 @@ class TestObservingBlockSummary:
         assert "1 cubes from groups of 5" in summary
         assert "method='median'" in summary
 
+    def test_summary_no_observables_no_extra_output(self, sci_block):
+        """Summary unchanged when no observables extracted."""
+        sci_block.load()
+        summary = sci_block.summary()
+        assert "observables" not in summary
+
+    def test_summary_shows_observables_labels(self, sci_block):
+        """Summary shows observables labels when present."""
+        mask = MagicMock()
+        mock_obs = MagicMock(spec=Observables)
+        mock_raw = {"wavelengths": np.array([3.5])}
+
+        sci_block.load()
+
+        with (
+            patch(
+                "ales_nrm.sampy_interface.extract.extract_observables",
+                return_value=mock_raw,
+            ),
+            patch(
+                "ales_nrm.sampy_interface.extract.build_observables_from_sampy",
+                return_value=mock_obs,
+            ),
+        ):
+            sci_block.extract_observables(mask=mask, label="raw", mask_dirs={})
+
+        summary = sci_block.summary()
+        assert "observables" in summary
+        assert "raw" in summary
+
+    def test_summary_shows_multiple_labels(self, sci_block):
+        """Summary shows all observables labels."""
+        mask = MagicMock()
+        mock_obs = MagicMock(spec=Observables)
+        mock_raw = {"wavelengths": np.array([3.5])}
+
+        sci_block.load()
+
+        with (
+            patch(
+                "ales_nrm.sampy_interface.extract.extract_observables",
+                return_value=mock_raw,
+            ),
+            patch(
+                "ales_nrm.sampy_interface.extract.build_observables_from_sampy",
+                return_value=mock_obs,
+            ),
+        ):
+            sci_block.extract_observables(mask=mask, label="raw", mask_dirs={})
+            sci_block.extract_observables(
+                mask=mask, label="calibrated", mask_dirs={}
+            )
+
+        summary = sci_block.summary()
+        assert "raw" in summary
+        assert "calibrated" in summary
+
+    def test_summary_unloaded_no_observables_info(self, sci_block):
+        """Unloaded block summary has no observables info."""
+        summary = sci_block.summary()
+        assert "observables" not in summary
+
 
 class TestStackFrames:
     """Tests for ObservingBlock.stack_frames()."""
@@ -1531,6 +1593,61 @@ class TestObservingSequence:
         assert "not loaded" not in summary
         assert "3/3 files" in summary
         assert "2/2 files" in summary
+
+    def test_summary_no_observables_no_extra_line(self, sci_block, cal_block):
+        """Sequence summary has no observables line when none exist."""
+        seq = ObservingSequence(blocks=[sci_block, cal_block], name="test")
+        seq.load_all()
+        summary = seq.summary()
+        assert "Blocks with observables" not in summary
+
+    def test_summary_shows_observables_count(self, sci_block, cal_block):
+        """Sequence summary shows count of blocks with observables."""
+        mask = MagicMock()
+        mock_obs = MagicMock(spec=Observables)
+        mock_raw = {"wavelengths": np.array([3.5])}
+
+        seq = ObservingSequence(blocks=[sci_block, cal_block], name="test")
+        seq.load_all()
+
+        with (
+            patch(
+                "ales_nrm.sampy_interface.extract.extract_observables",
+                return_value=mock_raw,
+            ),
+            patch(
+                "ales_nrm.sampy_interface.extract.build_observables_from_sampy",
+                return_value=mock_obs,
+            ),
+        ):
+            sci_block.extract_observables(mask=mask, label="raw", mask_dirs={})
+
+        summary = seq.summary()
+        assert "Blocks with observables: 1/2" in summary
+
+    def test_summary_all_blocks_with_observables(self, sci_block, cal_block):
+        """Full count if all blocks have observables."""
+        mask = MagicMock()
+        mock_obs = MagicMock(spec=Observables)
+        mock_raw = {"wavelengths": np.array([3.5])}
+
+        seq = ObservingSequence(blocks=[sci_block, cal_block], name="test")
+        seq.load_all()
+
+        with (
+            patch(
+                "ales_nrm.sampy_interface.extract.extract_observables",
+                return_value=mock_raw,
+            ),
+            patch(
+                "ales_nrm.sampy_interface.extract.build_observables_from_sampy",
+                return_value=mock_obs,
+            ),
+        ):
+            seq.extract_all_observables(mask=mask, mask_dirs={})
+
+        summary = seq.summary()
+        assert "Blocks with observables: 2/2" in summary
 
 
 class TestObservingSequenceIntegration:

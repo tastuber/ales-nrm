@@ -747,21 +747,25 @@ class ObservingBlock:
                 )
             else:
                 parts.append(f"{self.n_files} files loaded")
-            return " ".join(parts)
-
-        # Stacked state.
-        group_sizes = [len(g) for g in self.stacking_groups]
-        if len(set(group_sizes)) == 1:
-            group_desc = (
-                f"{len(group_sizes)} cubes from groups of {group_sizes[0]}"
-            )
         else:
-            group_desc = (
-                f"{len(group_sizes)} cubes from groups of {group_sizes}"
+            # Stacked state.
+            group_sizes = [len(g) for g in self.stacking_groups]
+            if len(set(group_sizes)) == 1:
+                group_desc = (
+                    f"{len(group_sizes)} cubes from groups of {group_sizes[0]}"
+                )
+            else:
+                group_desc = (
+                    f"{len(group_sizes)} cubes from groups of {group_sizes}"
+                )
+            parts.append(
+                f"stacked ({group_desc}, method='{self.stacking_method}')"
             )
-        parts.append(
-            f"stacked ({group_desc}, method='{self.stacking_method}')"
-        )
+
+        if self.observables:
+            labels = list(self.observables.keys())
+            parts.append(f"observables: {labels}")
+
         return " ".join(parts)
 
     def compute_complex_visibilities(
@@ -1120,6 +1124,13 @@ class ObservingSequence:
         lines.append(f"  Science blocks: {len(self.science_blocks)}")
         lines.append(f"  Calibrator blocks: {len(self.calibrator_blocks)}")
         lines.append(f"  Targets: {', '.join(self.targets)}")
+
+        n_with_obs = sum(1 for b in self.blocks if b.observables)
+        if n_with_obs > 0:
+            lines.append(
+                f"  Blocks with observables: {n_with_obs}/{len(self.blocks)}"
+            )
+
         lines.append("")
 
         for i, block in enumerate(self.blocks):
