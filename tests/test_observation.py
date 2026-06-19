@@ -188,6 +188,118 @@ class TestObservingBlock:
         )
 
 
+class TestCalibrateObservables:
+    """Tests for ObservingBlock.calibrate_observables."""
+
+    def test_not_loaded_raises(self, sample_directory):
+        """Raises RuntimeError if block not loaded."""
+        block = ObservingBlock(
+            block_type=BlockType.SCI,
+            target="test",
+            directory=sample_directory,
+            file_range=(5001, 5003),
+        )
+
+        with pytest.raises(RuntimeError, match="not been loaded"):
+            block.calibrate_observables(calibrator_blocks=[MagicMock()])
+
+    def test_unknown_backend_raises(self, sci_block):
+        """Raises ValueError for unrecognized backend."""
+        sci_block.load()
+        with pytest.raises(ValueError, match="Unknown calibration backend"):
+            sci_block.calibrate_observables(
+                calibrator_blocks=[MagicMock()],
+                backend="nonexistent",
+            )
+
+    def test_normalizes_single_calibrator(self, sci_block, sample_directory):
+        """Single calibrator (not list) is normalized to list."""
+        sci_block.load()
+
+        mock_cal_obs = MagicMock()
+        with patch(
+            "ales_nrm.sampy_interface.calibrate.calibrate_block",
+            return_value=mock_cal_obs,
+        ) as mock_cb:
+            sci_block.calibrate_observables(calibrator_blocks=MagicMock())
+
+        # calibrate_block received a list
+        call_args = mock_cb.call_args
+        cal_arg = call_args[0][1]
+        assert isinstance(cal_arg, list)
+        assert len(cal_arg) == 1
+
+    def test_stores_under_output_label(self, sci_block, sample_directory):
+        """Result stored under output_label in observables."""
+        sci_block.load()
+
+        mock_cal_obs = MagicMock()
+        with patch(
+            "ales_nrm.sampy_interface.calibrate.calibrate_block",
+            return_value=mock_cal_obs,
+        ):
+            sci_block.calibrate_observables(
+                calibrator_blocks=[MagicMock()],
+                output_label="my_cal",
+            )
+
+        assert "my_cal" in sci_block.observables
+        assert sci_block.observables["my_cal"] is mock_cal_obs
+
+    def test_backend_kwargs_forwarded(self, sci_block):
+        """Backend kwargs are forwarded to calibrate_block."""
+        sci_block.load()
+
+        mock_cal_obs = MagicMock()
+        with patch(
+            "ales_nrm.sampy_interface.calibrate.calibrate_block",
+            return_value=mock_cal_obs,
+        ) as mock_cb:
+            sci_block.calibrate_observables(
+                calibrator_blocks=[MagicMock()],
+                poly_order=2,
+                display=True,
+            )
+
+        call_kwargs = mock_cb.call_args[1]
+        assert call_kwargs["poly_order"] == 2
+        assert call_kwargs["display"] is True
+
+    def test_calibrate_flags_forwarded(self, sci_block):
+        """calibrate_cp and calibrate_vis2 forwarded."""
+        sci_block.load()
+
+        mock_cal_obs = MagicMock()
+        with patch(
+            "ales_nrm.sampy_interface.calibrate.calibrate_block",
+            return_value=mock_cal_obs,
+        ) as mock_cb:
+            sci_block.calibrate_observables(
+                calibrator_blocks=[MagicMock()],
+                calibrate_cp=False,
+                calibrate_vis2=True,
+            )
+
+        call_kwargs = mock_cb.call_args[1]
+        assert call_kwargs["calibrate_cp"] is False
+        assert call_kwargs["calibrate_vis2"] is True
+
+    def test_default_backend_is_sampy(self, sci_block):
+        """Default backend dispatches to sampy."""
+        sci_block.load()
+
+        mock_cal_obs = MagicMock()
+        with patch(
+            "ales_nrm.sampy_interface.calibrate.calibrate_block",
+            return_value=mock_cal_obs,
+        ) as mock_cb:
+            sci_block.calibrate_observables(
+                calibrator_blocks=[MagicMock()],
+            )
+
+        mock_cb.assert_called_once()
+
+
 class TestObservingBlockValidation:
     """Tests for file validation after loading."""
 

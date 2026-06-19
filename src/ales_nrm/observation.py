@@ -986,6 +986,103 @@ class ObservingBlock:
             backend,
         )
 
+    def calibrate_observables(
+        self,
+        calibrator_blocks: "ObservingBlock | list[ObservingBlock]",
+        *,
+        source_label: str = "raw",
+        output_label: str = "calibrated",
+        calibrate_cp: bool = True,
+        calibrate_vis2: bool = True,
+        backend: str = "sampy",
+        **backend_kwargs: Any,
+    ) -> None:
+        """Calibrate this block's observables against calibrators.
+
+        Dispatches to the appropriate calibration backend to
+        remove instrumental systematics from closure phases
+        (subtractively) and squared visibilities (divisively).
+        The calibrated result is stored under ``output_label``
+        in ``self.observables``.
+
+        The calibrated ``Observables`` contains only ``vis2``,
+        ``vis2_err``, ``t3phi``, ``t3phi_err``, and flags.
+        Complex visibility fields are not populated (SAMpy, the
+        only current backend, does not calibrate them).
+
+        Args:
+            calibrator_blocks: One or more ObservingBlocks to
+                use as calibrators. Each must have an
+                extraction under ``source_label``.
+            source_label: Label under which raw extractions
+                are stored on both this block and the
+                calibrator blocks. Default ``'raw'``.
+            output_label: Label under which to store the
+                calibrated ``Observables``. Default
+                ``'calibrated'``.
+            calibrate_cp: If True, calibrate closure phases.
+                Default True.
+            calibrate_vis2: If True, calibrate squared
+                visibilities. Default True.
+            backend: Calibration backend name. Currently
+                supported: ``'sampy'``.
+            **backend_kwargs: Backend-specific keyword
+                arguments passed directly to the backend
+                calibration function.
+
+        Backend-specific kwargs for ``backend='sampy'``:
+            poly_order (int): Polynomial order for temporal
+                calibration. 0 = constant, 1 = linear,
+                2 = quadratic, 3 = cubic, etc.
+                Default 1.
+            display (bool): Show SAMpy calibration diagnostic
+                plots. Default False.
+
+        Raises:
+            RuntimeError: If this block has not been loaded.
+            ValueError: If backend is not recognized, or if
+                calibrator blocks lack required extractions.
+            ImportError: If SAMpy is not installed.
+        """
+        if not self.is_loaded:
+            raise RuntimeError(
+                f"Block '{self.target}' "
+                f"({self.block_type.value}) has not been "
+                f"loaded. Call load() first."
+            )
+
+        # Normalize to list
+        if not isinstance(calibrator_blocks, list):
+            calibrator_blocks = [calibrator_blocks]
+
+        if backend == "sampy":
+            from ales_nrm.sampy_interface.calibrate import (
+                calibrate_block,
+            )
+
+            cal_obs = calibrate_block(
+                self,
+                calibrator_blocks,
+                source_label=source_label,
+                calibrate_cp=calibrate_cp,
+                calibrate_vis2=calibrate_vis2,
+                **backend_kwargs,
+            )
+        else:
+            raise ValueError(
+                f"Unknown calibration backend '{backend}'. Supported: 'sampy'."
+            )
+
+        self.observables[output_label] = cal_obs
+
+        logger.info(
+            "Calibrated %s block '%s' stored under '%s' (backend='%s').",
+            self.block_type.value,
+            self.target,
+            output_label,
+            backend,
+        )
+
 
 @dataclass
 class ObservingSequence:
