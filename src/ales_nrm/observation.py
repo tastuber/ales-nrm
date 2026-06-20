@@ -1037,6 +1037,10 @@ class ObservingBlock:
                 Default 1.
             display (bool): Show SAMpy calibration diagnostic
                 plots. Default False.
+            suppress_sampy_prints (bool): If True (default),
+            suppress stdout print statements from SAMpy's
+            ``polynomial_calibrate``. Set to False to allow
+            SAMpy's diagnostic output to pass through.
 
         Raises:
             RuntimeError: If this block has not been loaded.

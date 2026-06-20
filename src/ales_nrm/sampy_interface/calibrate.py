@@ -7,6 +7,8 @@ containing only closure phases and squared visibilities (SAMpy
 does not calibrate complex visibilities).
 """
 
+import contextlib
+import io
 import logging
 import warnings
 from typing import TYPE_CHECKING
@@ -148,6 +150,23 @@ def _get_block_times(
     return times
 
 
+def _stdout_context(
+    suppress: bool,
+) -> contextlib.AbstractContextManager:
+    """Return a context manager that suppresses or passes stdout.
+
+    Args:
+        suppress: If True, redirect stdout to a StringIO sink. If False,
+            return a no-op context manager.
+
+    Returns:
+        A context manager suitable for use in a ``with`` statement.
+    """
+    if suppress:
+        return contextlib.redirect_stdout(io.StringIO())
+    return contextlib.nullcontext()
+
+
 def calibrate_block(
     sci_block: "ObservingBlock",
     cal_blocks: list["ObservingBlock"],
@@ -157,6 +176,7 @@ def calibrate_block(
     calibrate_cp: bool = True,
     calibrate_vis2: bool = True,
     display: bool = False,
+    suppress_sampy_prints: bool = True,
 ) -> "Observables":
     """Calibrate one science block against calibrator blocks.
 
@@ -188,6 +208,10 @@ def calibrate_block(
             visibilities. Default True.
         display: If True, show SAMpy calibration diagnostic
             plots. Default False.
+        suppress_sampy_prints: If True (default), suppress
+            stdout print statements from SAMpy's
+            ``polynomial_calibrate``. Set to False to allow
+            SAMpy's diagnostic output to pass through.
 
     Returns:
         Calibrated ``Observables`` instance with ``vis2``,
@@ -304,15 +328,18 @@ def calibrate_block(
                 wl_f,
             )
 
-            calibrated, cal_variance, cal_scatter, _ = polynomial_calibrate(
-                sci_cps,
-                cal_cps,
-                sci_time,
-                cal_times,
-                poly_order,
-                "cps",
-                display=display,
-            )
+            with _stdout_context(suppress_sampy_prints):
+                calibrated, cal_variance, cal_scatter, _ = (
+                    polynomial_calibrate(
+                        sci_cps,
+                        cal_cps,
+                        sci_time,
+                        cal_times,
+                        poly_order,
+                        "cps",
+                        display=display,
+                    )
+                )
 
             # calibrated shape: (n_tri, n_pointings) = (n_tri, 1)
             t3phi[:, w_idx] = calibrated[:, 0]
@@ -356,15 +383,18 @@ def calibrate_block(
                 wl_f,
             )
 
-            calibrated, cal_variance, cal_scatter, _ = polynomial_calibrate(
-                sci_v2,
-                cal_v2,
-                sci_time,
-                cal_times,
-                poly_order,
-                "v2s",
-                display=display,
-            )
+            with _stdout_context(suppress_sampy_prints):
+                calibrated, cal_variance, cal_scatter, _ = (
+                    polynomial_calibrate(
+                        sci_v2,
+                        cal_v2,
+                        sci_time,
+                        cal_times,
+                        poly_order,
+                        "v2s",
+                        display=display,
+                    )
+                )
 
             # calibrated shape: (n_bl, n_pointings) = (n_bl, 1)
             vis2[:, w_idx] = calibrated[:, 0]
@@ -392,6 +422,7 @@ def calibrate_sequence(
     calibrate_cp: bool = True,
     calibrate_vis2: bool = True,
     display: bool = False,
+    suppress_sampy_prints: bool = True,
 ) -> None:
     """Calibrate all SCI blocks using all CAL blocks in a sequence.
 
@@ -412,6 +443,10 @@ def calibrate_sequence(
             Default True.
         display: If True, show SAMpy calibration diagnostic
             plots. Default False.
+        suppress_sampy_prints: If True (default), suppress
+            stdout print statements from SAMpy's
+            ``polynomial_calibrate``. Set to False to allow
+            SAMpy's diagnostic output to pass through.
 
     Raises:
         ValueError: If no calibrator blocks are found in the
@@ -452,6 +487,7 @@ def calibrate_sequence(
             calibrate_cp=calibrate_cp,
             calibrate_vis2=calibrate_vis2,
             display=display,
+            suppress_sampy_prints=suppress_sampy_prints,
         )
         sci_block.observables[output_label] = cal_obs
 
