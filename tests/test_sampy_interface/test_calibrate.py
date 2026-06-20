@@ -1369,3 +1369,161 @@ class TestCalibrateObservablesMethod:
                 poly_order=0,
             )
         assert isinstance(obs, Observables)
+
+
+class TestSuppressSampyPrints:
+    """Tests for suppress_sampy_prints parameter."""
+
+    @pytest.mark.parametrize(
+        "suppress,expect_silent",
+        [
+            (True, True),
+            (False, False),
+        ],
+    )
+    def test_block_stdout_control(
+        self,
+        mock_sci_block,
+        mock_cal_block_1,
+        mock_cal_block_2,
+        patched_sampy,
+        capsys,
+        suppress,
+        expect_silent,
+    ):
+        """suppress_sampy_prints controls stdout visibility."""
+
+        def _printing_cal(*args, **kwargs):
+            print("sampy output")
+            return _zero_poly_cal(*args, **kwargs)
+
+        with patched_sampy() as ctx:
+            ctx.set_side_effect(_printing_cal)
+            calibrate_block(
+                mock_sci_block,
+                [mock_cal_block_1, mock_cal_block_2],
+                suppress_sampy_prints=suppress,
+            )
+
+        captured = capsys.readouterr()
+        if expect_silent:
+            assert "sampy output" not in captured.out
+        else:
+            assert "sampy output" in captured.out
+
+    def test_suppress_does_not_alter_results(
+        self,
+        mock_sci_block,
+        mock_cal_block_1,
+        mock_cal_block_2,
+        patched_sampy,
+    ):
+        """Suppression does not change calibration values."""
+
+        def _printing_cal(*args, **kwargs):
+            print("sampy output")
+            return _zero_poly_cal(*args, **kwargs)
+
+        results = {}
+        for suppress in (True, False):
+            with patched_sampy() as ctx:
+                ctx.set_side_effect(_printing_cal)
+                results[suppress] = calibrate_block(
+                    mock_sci_block,
+                    [mock_cal_block_1, mock_cal_block_2],
+                    suppress_sampy_prints=suppress,
+                )
+
+        np.testing.assert_array_equal(
+            results[True].t3phi, results[False].t3phi
+        )
+        np.testing.assert_array_equal(results[True].vis2, results[False].vis2)
+
+    @pytest.mark.parametrize(
+        "suppress,expect_silent",
+        [
+            (True, True),
+            (False, False),
+        ],
+    )
+    def test_sequence_forwards_suppress(
+        self,
+        mock_sci_block,
+        mock_cal_block_1,
+        mock_cal_block_2,
+        patched_sampy,
+        capsys,
+        suppress,
+        expect_silent,
+    ):
+        """calibrate_sequence forwards suppress_sampy_prints."""
+
+        def _printing_cal(*args, **kwargs):
+            print("sampy output")
+            return _zero_poly_cal(*args, **kwargs)
+
+        seq = MagicMock()
+        seq.science_blocks = [mock_sci_block]
+        seq.calibrator_blocks = [
+            mock_cal_block_1,
+            mock_cal_block_2,
+        ]
+        seq.name = "test_seq"
+
+        with patched_sampy() as ctx:
+            ctx.set_side_effect(_printing_cal)
+            calibrate_sequence(seq, suppress_sampy_prints=suppress)
+
+        captured = capsys.readouterr()
+        if expect_silent:
+            assert "sampy output" not in captured.out
+        else:
+            assert "sampy output" in captured.out
+
+    @pytest.mark.sampy
+    @pytest.mark.parametrize(
+        "suppress,expect_silent",
+        [
+            (True, True),
+            (False, False),
+        ],
+    )
+    def test_real_sampy_stdout_control(
+        self,
+        make_mock_block,
+        sample_wavelengths_short,
+        capsys,
+        suppress,
+        expect_silent,
+    ):
+        """Real SAMpy print controlled by suppress parameter."""
+        cal = make_mock_block(
+            "Cal",
+            ["07:00:00.000"],
+            cp_val=2.0,
+            vis2_val=1.0,
+            wavelengths=sample_wavelengths_short,
+            block_type="CAL",
+        )
+        sci = make_mock_block(
+            "Sci",
+            ["08:00:00.000"],
+            cp_val=15.0,
+            vis2_val=0.85,
+            wavelengths=sample_wavelengths_short,
+            block_type="SCI",
+        )
+
+        calibrate_block(
+            sci,
+            [cal],
+            poly_order=0,
+            calibrate_vis2=False,
+            suppress_sampy_prints=suppress,
+        )
+
+        captured = capsys.readouterr()
+        if expect_silent:
+            assert "poly_order" not in captured.out
+        else:
+            assert "poly_order" in captured.out
