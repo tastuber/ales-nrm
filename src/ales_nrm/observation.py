@@ -1087,6 +1087,86 @@ class ObservingBlock:
             backend,
         )
 
+    def save_oifits(
+        self,
+        output_dir: str | Path,
+        label: str | None = None,
+        *,
+        filename: str | None = None,
+        overwrite: bool = False,
+    ) -> list[Path]:
+        """Save observables to OIFITS2 files.
+
+        If label is None, writes one OIFITS file per label present
+        in self.observables. If a specific label is given, writes
+        only that single Observables.
+
+        Args:
+            output_dir: Directory for output files.
+            label: Specific label to save. If None, saves all
+                labels (one file each).
+            filename: Explicit filename (only valid when saving
+                a single label). If None, auto-generated.
+            overwrite: Overwrite existing files.
+
+        Returns:
+            List of Paths to written files.
+
+        Raises:
+            KeyError: If a specific label is given but not found
+                in self.observables.
+            ValueError: If filename is specified but label is
+                None and multiple labels exist (ambiguous).
+        """
+        from ales_nrm.io.oifits import (
+            generate_oifits_filename,
+            write_oifits,
+        )
+
+        if label is not None:
+            if label not in self.observables:
+                raise KeyError(
+                    f"Label '{label}' not found in "
+                    f"observables for block '{self.target}'. "
+                    f"Available: {list(self.observables.keys())}"
+                )
+            labels_to_save = [label]
+        else:
+            labels_to_save = list(self.observables.keys())
+
+        if filename is not None and len(labels_to_save) > 1:
+            raise ValueError(
+                "Cannot specify filename when saving "
+                "multiple labels. Either specify a label "
+                "or omit filename."
+            )
+
+        output_dir = Path(output_dir)
+        paths = []
+
+        for lbl in labels_to_save:
+            obs = self.observables[lbl]
+            if filename is not None:
+                fname = filename
+            else:
+                fname = generate_oifits_filename(obs, label=lbl)
+            path = write_oifits(
+                obs,
+                output_dir,
+                filename=fname,
+                overwrite=overwrite,
+            )
+            paths.append(path)
+            logger.info(
+                "Saved OIFITS for %s block '%s' label '%s': %s",
+                self.block_type.value,
+                self.target,
+                lbl,
+                path,
+            )
+
+        return paths
+
 
 @dataclass
 class ObservingSequence:
@@ -1353,6 +1433,163 @@ class ObservingSequence:
                 backend=backend,
                 **backend_kwargs,
             )
+
+    def save_all_oifits(
+        self,
+        output_dir: str | Path,
+        *,
+        label: str | None = None,
+        block_filter: "str | BlockType | None" = None,
+        combine: bool = False,
+        filename: str | None = None,
+        overwrite: bool = False,
+    ) -> list[Path]:
+        """Save observables for blocks in the sequence to OIFITS2.
+
+        If label is None, writes OIFITS files for all labels
+        present on each matching block. If a specific label is
+        given, writes only for that label (skipping blocks that
+        lack it, with a warning).
+
+        Args:
+            output_dir: Directory for output files.
+            label: Specific label to save. If None, saves all
+                labels present on each block.
+            block_filter: Filter blocks by BlockType or target
+                name string. If None, processes all blocks.
+            combine: If True, write all matching Observables
+                (per label) into a single multi-block OIFITS
+                file. If False (default), write one file per
+                block per label.
+            filename: Explicit filename (only valid when
+                combine=True with a single label). If None,
+                auto-generated.
+            overwrite: Overwrite existing files.
+
+        Returns:
+            List of Paths to written files.
+        """
+        from ales_nrm.io.oifits import write_oifits
+
+        output_dir = Path(output_dir)
+
+        # Filter blocks
+        blocks = self._filter_blocks(block_filter)
+
+        if not combine:
+            paths = []
+            for block in blocks:
+                if label is not None:
+                    if label not in block.observables:
+                        warnings.warn(
+                            f"Block '{block.target}' "
+                            f"({block.block_type.value}) "
+                            f"does not have label '{label}'. "
+                            f"Skipping.",
+                            UserWarning,
+                            stacklevel=2,
+                        )
+                        continue
+                    block_paths = block.save_oifits(
+                        output_dir,
+                        label=label,
+                        overwrite=overwrite,
+                    )
+                else:
+                    if not block.observables:
+                        continue
+                    block_paths = block.save_oifits(
+                        output_dir,
+                        label=None,
+                        overwrite=overwrite,
+                    )
+                paths.extend(block_paths)
+
+            return paths
+
+        # combine=True: collect observables grouped by label
+        if label is not None:
+            labels_to_combine = [label]
+        else:
+            labels_to_combine = []
+            seen = set()
+            for block in blocks:
+                for lbl in block.observables:
+                    if lbl not in seen:
+                        seen.add(lbl)
+                        labels_to_combine.append(lbl)
+
+        if filename is not None and len(labels_to_combine) > 1:
+            raise ValueError(
+                "Cannot specify filename when combining "
+                "multiple labels. Either specify a label "
+                "or omit filename."
+            )
+
+        paths = []
+        for lbl in labels_to_combine:
+            obs_list = []
+            for block in blocks:
+                if lbl not in block.observables:
+                    warnings.warn(
+                        f"Block '{block.target}' "
+                        f"({block.block_type.value}) "
+                        f"does not have label '{lbl}'. "
+                        f"Skipping.",
+                        UserWarning,
+                        stacklevel=2,
+                    )
+                    continue
+                obs_list.append(block.observables[lbl])
+
+            if not obs_list:
+                continue
+
+            path = write_oifits(
+                obs_list,
+                output_dir,
+                filename=filename,
+                overwrite=overwrite,
+            )
+            paths.append(path)
+            logger.info(
+                "Saved combined OIFITS for label '%s': %d blocks -> %s",
+                lbl,
+                len(obs_list),
+                path,
+            )
+
+        return paths
+
+    def _filter_blocks(
+        self,
+        block_filter: "str | BlockType | None",
+    ) -> list[ObservingBlock]:
+        """Filter blocks by type or target name.
+
+        Args:
+            block_filter: A BlockType, a string matching
+                BlockType value, or a target name. None
+                returns all blocks.
+
+        Returns:
+            Filtered list of blocks.
+        """
+        if block_filter is None:
+            return list(self.blocks)
+
+        if isinstance(block_filter, BlockType):
+            return [b for b in self.blocks if b.block_type == block_filter]
+
+        # Try as BlockType string first
+        try:
+            bt = BlockType(block_filter)
+            return [b for b in self.blocks if b.block_type == bt]
+        except ValueError:
+            pass
+
+        # Treat as target name
+        return [b for b in self.blocks if b.target == block_filter]
 
     def __len__(self) -> int:
         """Return the number of blocks."""
