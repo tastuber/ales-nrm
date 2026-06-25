@@ -2,6 +2,7 @@
 
 import datetime
 import warnings
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -2324,3 +2325,430 @@ class TestExtractAllObservables:
 
         assert "first" in sci_block.observables
         assert "second" in sci_block.observables
+
+
+class TestObservingBlockSaveOifits:
+    """Tests for ObservingBlock.save_oifits."""
+
+    def test_save_single_label(self, sci_block, tmp_path):
+        """Save a single label to OIFITS."""
+        sci_block.load()
+        mock_obs = MagicMock()
+        mock_obs.target = "test_target"
+        mock_obs.calibrated = False
+        mock_obs.mjd = 60000.0
+        mock_obs.time_start = "08:00:00.000"
+        sci_block.observables["raw"] = mock_obs
+
+        expected_path = tmp_path / "test.oifits"
+        with (
+            patch(
+                "ales_nrm.io.oifits.write_oifits",
+                return_value=expected_path,
+            ) as mock_write,
+            patch(
+                "ales_nrm.io.oifits.generate_oifits_filename",
+                return_value="test.oifits",
+            ),
+        ):
+            paths = sci_block.save_oifits(tmp_path, label="raw")
+
+        assert len(paths) == 1
+        assert paths[0] == expected_path
+        mock_write.assert_called_once()
+
+    def test_save_all_labels(self, sci_block, tmp_path):
+        """Save all labels when label is None."""
+        sci_block.load()
+        mock_obs_raw = MagicMock()
+        mock_obs_cal = MagicMock()
+        sci_block.observables["raw"] = mock_obs_raw
+        sci_block.observables["calibrated"] = mock_obs_cal
+
+        with (
+            patch(
+                "ales_nrm.io.oifits.write_oifits",
+                return_value=tmp_path / "out.oifits",
+            ),
+            patch(
+                "ales_nrm.io.oifits.generate_oifits_filename",
+                return_value="out.oifits",
+            ),
+        ):
+            paths = sci_block.save_oifits(tmp_path)
+
+        assert len(paths) == 2
+
+    def test_raises_key_error_missing_label(self, sci_block, tmp_path):
+        """Raises KeyError if label not found."""
+        sci_block.load()
+        sci_block.observables["raw"] = MagicMock()
+
+        with pytest.raises(KeyError, match="nonexistent"):
+            sci_block.save_oifits(tmp_path, label="nonexistent")
+
+    def test_raises_value_error_filename_multiple_labels(
+        self, sci_block, tmp_path
+    ):
+        """Raises ValueError if filename with multiple labels."""
+        sci_block.load()
+        sci_block.observables["raw"] = MagicMock()
+        sci_block.observables["cal"] = MagicMock()
+
+        with pytest.raises(ValueError, match="Cannot specify filename"):
+            sci_block.save_oifits(tmp_path, filename="explicit.oifits")
+
+    def test_explicit_filename_used(self, sci_block, tmp_path):
+        """Explicit filename is passed to write_oifits."""
+        sci_block.load()
+        sci_block.observables["raw"] = MagicMock()
+
+        expected_path = tmp_path / "custom.oifits"
+        with patch(
+            "ales_nrm.io.oifits.write_oifits",
+            return_value=expected_path,
+        ) as mock_write:
+            paths = sci_block.save_oifits(
+                tmp_path,
+                label="raw",
+                filename="custom.oifits",
+            )
+
+        call_kwargs = mock_write.call_args[1]
+        assert call_kwargs["filename"] == "custom.oifits"
+        assert paths[0] == expected_path
+
+    def test_overwrite_forwarded(self, sci_block, tmp_path):
+        """Overwrite parameter is forwarded."""
+        sci_block.load()
+        sci_block.observables["raw"] = MagicMock()
+
+        with (
+            patch(
+                "ales_nrm.io.oifits.write_oifits",
+                return_value=tmp_path / "out.oifits",
+            ) as mock_write,
+            patch(
+                "ales_nrm.io.oifits.generate_oifits_filename",
+                return_value="out.oifits",
+            ),
+        ):
+            sci_block.save_oifits(tmp_path, label="raw", overwrite=True)
+
+        call_kwargs = mock_write.call_args[1]
+        assert call_kwargs["overwrite"] is True
+
+
+class TestObservingSequenceSaveAllOifits:
+    """Tests for ObservingSequence.save_all_oifits."""
+
+    def test_save_one_file_per_block(self, sci_block, cal_block, tmp_path):
+        """Default: one file per block per label."""
+        sci_block.load()
+        cal_block.load()
+        sci_block.observables["raw"] = MagicMock()
+        cal_block.observables["raw"] = MagicMock()
+
+        seq = ObservingSequence(blocks=[sci_block, cal_block], name="test")
+
+        with (
+            patch(
+                "ales_nrm.io.oifits.write_oifits",
+                return_value=tmp_path / "out.oifits",
+            ),
+            patch(
+                "ales_nrm.io.oifits.generate_oifits_filename",
+                return_value="out.oifits",
+            ),
+        ):
+            paths = seq.save_all_oifits(tmp_path, label="raw")
+
+        assert len(paths) == 2
+
+    def test_combine_true_single_file(self, sci_block, cal_block, tmp_path):
+        """combine=True writes single file with all blocks."""
+        sci_block.load()
+        cal_block.load()
+        mock_obs_sci = MagicMock()
+        mock_obs_cal = MagicMock()
+        sci_block.observables["raw"] = mock_obs_sci
+        cal_block.observables["raw"] = mock_obs_cal
+
+        seq = ObservingSequence(blocks=[sci_block, cal_block], name="test")
+
+        expected_path = tmp_path / "combined.oifits"
+        with patch(
+            "ales_nrm.io.oifits.write_oifits",
+            return_value=expected_path,
+        ) as mock_write:
+            paths = seq.save_all_oifits(tmp_path, label="raw", combine=True)
+
+        assert len(paths) == 1
+        # write_oifits received a list of observables
+        call_args = mock_write.call_args[0]
+        assert isinstance(call_args[0], list)
+        assert len(call_args[0]) == 2
+
+    def test_filter_by_block_type(self, sci_block, cal_block, tmp_path):
+        """Filters by BlockType."""
+        sci_block.load()
+        cal_block.load()
+        sci_block.observables["raw"] = MagicMock()
+        cal_block.observables["raw"] = MagicMock()
+
+        seq = ObservingSequence(blocks=[sci_block, cal_block], name="test")
+
+        with (
+            patch(
+                "ales_nrm.io.oifits.write_oifits",
+                return_value=tmp_path / "out.oifits",
+            ),
+            patch(
+                "ales_nrm.io.oifits.generate_oifits_filename",
+                return_value="out.oifits",
+            ),
+        ):
+            paths = seq.save_all_oifits(
+                tmp_path,
+                label="raw",
+                block_filter=BlockType.SCI,
+            )
+
+        assert len(paths) == 1
+
+    def test_filter_by_block_type_string(self, sci_block, cal_block, tmp_path):
+        """Filters by BlockType string value."""
+        sci_block.load()
+        cal_block.load()
+        sci_block.observables["raw"] = MagicMock()
+        cal_block.observables["raw"] = MagicMock()
+
+        seq = ObservingSequence(blocks=[sci_block, cal_block], name="test")
+
+        with (
+            patch(
+                "ales_nrm.io.oifits.write_oifits",
+                return_value=tmp_path / "out.oifits",
+            ),
+            patch(
+                "ales_nrm.io.oifits.generate_oifits_filename",
+                return_value="out.oifits",
+            ),
+        ):
+            paths = seq.save_all_oifits(
+                tmp_path,
+                label="raw",
+                block_filter="CAL",
+            )
+
+        assert len(paths) == 1
+
+    def test_filter_by_target_name(self, sci_block, cal_block, tmp_path):
+        """Filters by target name string."""
+        sci_block.load()
+        cal_block.load()
+        sci_block.observables["raw"] = MagicMock()
+        cal_block.observables["raw"] = MagicMock()
+
+        seq = ObservingSequence(blocks=[sci_block, cal_block], name="test")
+
+        with (
+            patch(
+                "ales_nrm.io.oifits.write_oifits",
+                return_value=tmp_path / "out.oifits",
+            ),
+            patch(
+                "ales_nrm.io.oifits.generate_oifits_filename",
+                return_value="out.oifits",
+            ),
+        ):
+            paths = seq.save_all_oifits(
+                tmp_path,
+                label="raw",
+                block_filter="test target",
+            )
+
+        assert len(paths) == 1
+
+    def test_skips_blocks_without_label_with_warning(
+        self, sci_block, cal_block, tmp_path
+    ):
+        """Skips blocks lacking the label, with warning."""
+        sci_block.load()
+        cal_block.load()
+        sci_block.observables["raw"] = MagicMock()
+        # cal_block has no "raw" label
+
+        seq = ObservingSequence(blocks=[sci_block, cal_block], name="test")
+
+        with (
+            patch(
+                "ales_nrm.io.oifits.write_oifits",
+                return_value=tmp_path / "out.oifits",
+            ),
+            patch(
+                "ales_nrm.io.oifits.generate_oifits_filename",
+                return_value="out.oifits",
+            ),
+        ):
+            with pytest.warns(UserWarning, match="does not have label"):
+                paths = seq.save_all_oifits(tmp_path, label="raw")
+
+        assert len(paths) == 1
+
+    def test_returns_list_of_paths(self, sci_block, tmp_path):
+        """Returns list of Path objects."""
+        sci_block.load()
+        sci_block.observables["raw"] = MagicMock()
+
+        seq = ObservingSequence(blocks=[sci_block], name="test")
+
+        expected = tmp_path / "out.oifits"
+        with (
+            patch(
+                "ales_nrm.io.oifits.write_oifits",
+                return_value=expected,
+            ),
+            patch(
+                "ales_nrm.io.oifits.generate_oifits_filename",
+                return_value="out.oifits",
+            ),
+        ):
+            paths = seq.save_all_oifits(tmp_path, label="raw")
+
+        assert all(isinstance(p, Path) for p in paths)
+
+    def test_combine_skips_missing_label_with_warning(
+        self, sci_block, cal_block, tmp_path
+    ):
+        """combine=True skips blocks without label, warning."""
+        sci_block.load()
+        cal_block.load()
+        sci_block.observables["raw"] = MagicMock()
+        # cal_block missing "raw"
+
+        seq = ObservingSequence(blocks=[sci_block, cal_block], name="test")
+
+        with patch(
+            "ales_nrm.io.oifits.write_oifits",
+            return_value=tmp_path / "out.oifits",
+        ):
+            with pytest.warns(UserWarning, match="does not have label"):
+                paths = seq.save_all_oifits(
+                    tmp_path, label="raw", combine=True
+                )
+
+        assert len(paths) == 1
+
+    def test_save_all_labels_no_label_arg(self, sci_block, tmp_path):
+        """When label=None, saves all labels on each block."""
+        sci_block.load()
+        sci_block.observables["raw"] = MagicMock()
+        sci_block.observables["calibrated"] = MagicMock()
+
+        seq = ObservingSequence(blocks=[sci_block], name="test")
+
+        with (
+            patch(
+                "ales_nrm.io.oifits.write_oifits",
+                return_value=tmp_path / "out.oifits",
+            ),
+            patch(
+                "ales_nrm.io.oifits.generate_oifits_filename",
+                return_value="out.oifits",
+            ),
+        ):
+            paths = seq.save_all_oifits(tmp_path)
+
+        assert len(paths) == 2
+
+    def test_combine_multiple_labels_no_filename(
+        self, sci_block, cal_block, tmp_path
+    ):
+        """combine=True with multiple labels writes per-label files."""
+        sci_block.load()
+        cal_block.load()
+        sci_block.observables["raw"] = MagicMock()
+        sci_block.observables["cal"] = MagicMock()
+        cal_block.observables["raw"] = MagicMock()
+        cal_block.observables["cal"] = MagicMock()
+
+        seq = ObservingSequence(blocks=[sci_block, cal_block], name="test")
+
+        with patch(
+            "ales_nrm.io.oifits.write_oifits",
+            return_value=tmp_path / "out.oifits",
+        ):
+            paths = seq.save_all_oifits(tmp_path, combine=True)
+
+        # One combined file per label ("raw" and "cal")
+        assert len(paths) == 2
+
+    def test_combine_raises_filename_multiple_labels(
+        self, sci_block, tmp_path
+    ):
+        """combine=True raises if filename + multiple labels."""
+        sci_block.load()
+        sci_block.observables["raw"] = MagicMock()
+        sci_block.observables["cal"] = MagicMock()
+
+        seq = ObservingSequence(blocks=[sci_block], name="test")
+
+        with pytest.raises(ValueError, match="Cannot specify filename"):
+            seq.save_all_oifits(
+                tmp_path,
+                combine=True,
+                filename="out.oifits",
+            )
+
+    def test_save_all_skips_empty_observables_silently(
+        self, sci_block, cal_block, tmp_path
+    ):
+        """Blocks with empty observables skipped when label=None."""
+        from unittest.mock import MagicMock, patch
+
+        sci_block.load()
+        cal_block.load()
+        # sci_block has observables, cal_block does not
+        sci_block.observables["raw"] = MagicMock()
+
+        seq = ObservingSequence(blocks=[sci_block, cal_block], name="test")
+
+        with (
+            patch(
+                "ales_nrm.io.oifits.write_oifits",
+                return_value=tmp_path / "out.oifits",
+            ),
+            patch(
+                "ales_nrm.io.oifits.generate_oifits_filename",
+                return_value="out.oifits",
+            ),
+        ):
+            # No warning expected — empty observables is not a
+            # warning condition when label=None
+            with warnings.catch_warnings():
+                warnings.simplefilter("error")
+                paths = seq.save_all_oifits(tmp_path)
+
+        assert len(paths) == 1
+
+    def test_combine_all_blocks_missing_label_yields_empty(
+        self, sci_block, cal_block, tmp_path
+    ):
+        """combine=True with no blocks having label returns empty."""
+        from unittest.mock import MagicMock
+
+        sci_block.load()
+        cal_block.load()
+        # Neither block has "missing_label"
+        sci_block.observables["raw"] = MagicMock()
+        cal_block.observables["raw"] = MagicMock()
+
+        seq = ObservingSequence(blocks=[sci_block, cal_block], name="test")
+
+        with pytest.warns(UserWarning, match="does not have label"):
+            paths = seq.save_all_oifits(
+                tmp_path, label="missing_label", combine=True
+            )
+
+        assert len(paths) == 0
