@@ -420,6 +420,13 @@ class Observables:
             angle_deg=mean_para_angle,
         )
 
+        # Apply parity flip when converting from pupil-plane x to
+        # sky u.
+        # If this flip is not applied, the source plane on-sky would be
+        # mirrored along the vertical axis (North-South), thus East and
+        # West would be swapped.
+        rotated_bl[:, 0] *= -1.0
+
         baselines = [
             BaselineInfo(
                 sta_index=(

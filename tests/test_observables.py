@@ -673,11 +673,18 @@ class TestFromBlockAndMask:
         assert not (bl.u == pytest.approx(1.0) and bl.v == pytest.approx(-1.0))
 
     def test_baselines_uv_zero_para_angle(self, mock_block, four_hole_mask):
-        """With zero parallactic angle, u,v equal bx,by."""
+        """With zero parallactic angle, u,v equal -bx,by.
+
+        The minus sign for the u-x-comparison results from a conversion
+        to on-sky coordinates where North is up and East is left.
+        This conversion is applied in Observables.from_block_and_mask().
+        """
         mock_block.parallactic_angles = np.array([0.0, 0.0, 0.0])
         obs = Observables.from_block_and_mask(mock_block, four_hole_mask)
         bl = obs.baselines[0]
-        assert bl.u == pytest.approx(1.0)
+        # Baseline vector from four_hole_mask: (x,y) = (1.0, -1.0)
+        # --> u,v = (-1.0, -1.0)
+        assert bl.u == pytest.approx(-1.0)
         assert bl.v == pytest.approx(-1.0)
 
     def test_triangles_count(self, mock_block, four_hole_mask):
