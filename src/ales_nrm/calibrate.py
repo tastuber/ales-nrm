@@ -8,8 +8,18 @@ calibration models.
 
 import logging
 import warnings
+from typing import TYPE_CHECKING
 
 import numpy as np
+
+from ales_nrm.observables import Observables
+from ales_nrm.utilities import (
+    _get_block_mean_time_seconds,
+    _get_block_times,
+)
+
+if TYPE_CHECKING:
+    from ales_nrm.observation import ObservingBlock
 
 logger = logging.getLogger(__name__)
 
@@ -344,3 +354,203 @@ def _linear_regression_multi(
         return result_value, result_error
 
     return reg_value, reg_error
+
+
+def calibrate_block(
+    sci_block: "ObservingBlock",
+    cal_blocks: list["ObservingBlock"],
+    *,
+    source_label: str = "raw",
+    method: str = "constant",
+    calibrate: set[str] | None = None,
+) -> "Observables":
+    """Calibrate a science block against calibrator blocks.
+
+    Removes instrumental systematics from interferometric
+    observables using either a constant (zeroth-order) or linear
+    (first-order) temporal calibration model.
+
+    Args:
+        sci_block: Block to calibrate (any block type).
+        cal_blocks: List of calibrator blocks. Each must have
+            ``Observables`` under ``source_label``.
+        source_label: Label key in ``block.observables``.
+        method: Calibration model. ``"constant"`` (zeroth-order)
+            or ``"linear"`` (first-order).
+        calibrate: Set of observable keys to calibrate.
+            ``None`` (default) means all four:
+            ``{"t3phi", "vis2", "visphi", "visamp"}``.
+            Empty set raises ``ValueError``.
+
+    Returns:
+        Calibrated ``Observables`` instance.
+
+    Raises:
+        ValueError: If arguments are invalid or required data
+            is missing.
+    """
+    # 1. Resolve calibrate set
+    if calibrate is None:
+        calibrate_set = set(_VALID_OBSERVABLES)
+    else:
+        calibrate_set = set(calibrate)
+        if not calibrate_set:
+            raise ValueError("calibrate set must not be empty.")
+        invalid = calibrate_set - _VALID_OBSERVABLES
+        if invalid:
+            raise ValueError(
+                f"Invalid observable keys: {sorted(invalid)}. "
+                f"Valid keys: {sorted(_VALID_OBSERVABLES)}."
+            )
+
+    # 2. Validate method
+    if method not in ("constant", "linear"):
+        raise ValueError(
+            f"Unknown calibration method '{method}'. "
+            f"Supported: 'constant', 'linear'."
+        )
+
+    # 3. Validate cal_blocks not empty
+    if not cal_blocks:
+        raise ValueError("At least one calibrator block is required.")
+
+    # 4. Validate linear requires >= 2 calibrators
+    if method == "linear" and len(cal_blocks) < 2:
+        raise ValueError(
+            f"method='linear' requires at least 2 calibrator "
+            f"blocks, but only {len(cal_blocks)} provided. "
+            f"Use method='constant' for a single calibrator."
+        )
+
+    # 5. Validate source_label on science block
+    if source_label not in sci_block.observables:
+        raise ValueError(
+            f"source_label '{source_label}' not found in "
+            f"science block observables. Available: "
+            f"{list(sci_block.observables.keys())}."
+        )
+
+    # 6. Validate source_label on each calibrator
+    for i, cal_block in enumerate(cal_blocks):
+        if source_label not in cal_block.observables:
+            raise ValueError(
+                f"source_label '{source_label}' not found "
+                f"in calibrator block {i} "
+                f"(target='{cal_block.target}'). Available: "
+                f"{list(cal_block.observables.keys())}."
+            )
+
+    sci_obs = sci_block.observables[source_label]
+
+    # Compute times for calibrators and science
+    sci_time = _get_block_mean_time_seconds(sci_block)
+    cal_times = _get_block_times(cal_blocks)
+
+    # Prepare output arrays
+    output_kwargs: dict[str, object] = {}
+
+    for key in calibrate_set:
+        attr_map = _OBS_ATTR_MAP[key]
+        value_attr = attr_map["value"]
+        error_attr = attr_map["error"]
+        flag_attr = attr_map["flag"]
+
+        sci_value = getattr(sci_obs, value_attr)
+        sci_err = getattr(sci_obs, error_attr)
+
+        # Check science block has the observable
+        if sci_value is None:
+            warnings.warn(
+                f"Observable '{key}' requested but not "
+                f"present on science block. Skipping.",
+                UserWarning,
+                stacklevel=2,
+            )
+            continue
+
+        if sci_err is None:
+            warnings.warn(
+                f"Observable '{key}' error not present "
+                f"on science block. Skipping.",
+                UserWarning,
+                stacklevel=2,
+            )
+            continue
+
+        # Gather calibrator values and errors
+        cal_values = []
+        cal_errors = []
+        for i, cal_block in enumerate(cal_blocks):
+            cal_obs = cal_block.observables[source_label]
+            cal_val = getattr(cal_obs, value_attr)
+            cal_err = getattr(cal_obs, error_attr)
+            if cal_val is None or cal_err is None:
+                raise ValueError(
+                    f"Calibrator block {i} "
+                    f"(target='{cal_block.target}') is "
+                    f"missing observable '{key}' or its "
+                    f"error."
+                )
+            cal_values.append(cal_val)
+            cal_errors.append(cal_err)
+
+        # Compute calibration reference values
+        if method == "constant":
+            ref_value, ref_err = _get_calibration_values_constant(
+                cal_values, cal_errors
+            )
+        else:
+            ref_value, ref_err = _get_calibration_values_linear(
+                cal_values, cal_errors, cal_times, sci_time
+            )
+
+        # Apply calibration operation
+        if key in _SUBTRACTION_OBSERVABLES:
+            cal_result, cal_sigma = _calibrate_subtraction(
+                sci_value, sci_err, ref_value, ref_err
+            )
+        else:
+            cal_result, cal_sigma = _calibrate_division(
+                sci_value, sci_err, ref_value, ref_err
+            )
+
+        # Store results
+        output_kwargs[value_attr] = cal_result
+        output_kwargs[error_attr] = cal_sigma
+        output_kwargs[flag_attr] = np.zeros(cal_result.shape, dtype=bool)
+
+    # Build calibrator target string
+    seen_targets: list[str] = []
+    for cal_block in cal_blocks:
+        if cal_block.target not in seen_targets:
+            seen_targets.append(cal_block.target)
+    calibrator_target = ", ".join(seen_targets)
+
+    # Build notes string
+    notes = (
+        f"method='{method}', "
+        f"n_calibrators={len(cal_blocks)}, "
+        f"source_label='{source_label}'"
+    )
+
+    # Construct output Observables copying geometry from science
+    result = Observables(
+        target=sci_obs.target,
+        wavelengths=sci_obs.wavelengths.copy(),
+        stations=sci_obs.stations,
+        baselines=sci_obs.baselines,
+        triangles=sci_obs.triangles,
+        mean_para_angle=sci_obs.mean_para_angle,
+        mjd=sci_obs.mjd,
+        time_start=sci_obs.time_start,
+        time_end=sci_obs.time_end,
+        block_type=sci_obs.block_type,
+        mask_name=sci_obs.mask_name,
+        calibrated=True,
+        calibrator_target=calibrator_target,
+        extraction_backend="native",
+        notes=notes,
+        **output_kwargs,
+    )
+
+    return result
