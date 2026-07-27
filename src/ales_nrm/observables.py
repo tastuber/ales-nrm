@@ -1,13 +1,14 @@
 """Container for extracted interferometric observables and helpers."""
 
-import datetime
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import numpy as np
-from astropy.time import Time
 
-from ales_nrm.utilities import rotate_points_2d
+from ales_nrm.utilities import (
+    _compute_mean_mjd,
+    rotate_points_2d,
+)
 
 if TYPE_CHECKING:
     from ales_nrm.observation import ObservingBlock
@@ -490,92 +491,3 @@ class Observables:
             block_type=block_type,
             mask_name=mask.source_name,
         )
-
-
-def _parse_time_string_to_seconds(time_str: str) -> float:
-    """Parse UT time string (HH:MM:SS.sss) to seconds past midnight."""
-    parts = time_str.strip().split(":")
-    hours = int(parts[0])
-    minutes = int(parts[1])
-    seconds = float(parts[2]) if len(parts) > 2 else 0.0
-    return hours * 3600.0 + minutes * 60.0 + seconds
-
-
-def _parse_timestamps_to_seconds(timestamps: np.ndarray) -> np.ndarray:
-    """Parse UT time strings to seconds, handling midnight crossing.
-
-    If a midnight crossing is detected (a large backward jump of more
-    than 12 hours between consecutive timestamps), all subsequent
-    timestamps are shifted by +86400 seconds. The observation_date is
-    assumed to be the date before midnight.
-
-    Args:
-        timestamps: 1D array of UT time strings.
-
-    Returns:
-        1D array of seconds (possibly exceeding 86400 for
-        post-midnight frames).
-    """
-    n = len(timestamps)
-    seconds = np.empty(n)
-    for i in range(n):
-        seconds[i] = _parse_time_string_to_seconds(str(timestamps[i]))
-
-    # Detect and handle midnight crossing
-    for i in range(1, n):
-        if seconds[i] - seconds[i - 1] < -43200.0:  # jump back > 12h
-            # All subsequent timestamps are past midnight
-            seconds[i:] += 86400.0
-            break
-
-    return seconds
-
-
-def _compute_mean_mjd(
-    observation_date: datetime.date | None,
-    timestamps: np.ndarray,
-) -> float | None:
-    """Compute mean MJD from observation date and UT time strings.
-
-    Handles midnight crossing: if timestamps span midnight, the
-    observation_date is assumed to be the date before midnight.
-
-    Args:
-        observation_date: The date of observation (date before midnight
-            if crossing occurs). None if unavailable.
-        timestamps: 1D array of UT time strings.
-
-    Returns:
-        Mean MJD as float, or None if observation_date is None.
-    """
-    if observation_date is None:
-        return None
-
-    seconds = _parse_timestamps_to_seconds(timestamps)
-    mean_seconds = float(np.mean(seconds))
-
-    # Convert to days offset and remaining time
-    days_offset = int(mean_seconds // 86400)
-    remaining_seconds = mean_seconds - days_offset * 86400.0
-
-    # Build datetime combining observation_date with mean time
-    hours = int(remaining_seconds // 3600)
-    remaining = remaining_seconds - hours * 3600
-    minutes = int(remaining // 60)
-    secs = remaining - minutes * 60
-    whole_secs = int(secs)
-    microsecs = int((secs - whole_secs) * 1e6)
-
-    base_dt = datetime.datetime(
-        year=observation_date.year,
-        month=observation_date.month,
-        day=observation_date.day,
-        hour=hours,
-        minute=minutes,
-        second=whole_secs,
-        microsecond=microsecs,
-    )
-    # Add any full-day offset (from midnight crossing)
-    dt = base_dt + datetime.timedelta(days=days_offset)
-
-    return float(Time(dt, scale="utc").mjd)

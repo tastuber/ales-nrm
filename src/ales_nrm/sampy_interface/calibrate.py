@@ -15,38 +15,16 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from ales_nrm.observables import (
-    Observables,
-    _parse_timestamps_to_seconds,
+from ales_nrm.observables import Observables
+from ales_nrm.utilities import (
+    _get_block_mean_time_seconds,
+    _get_block_times,
 )
 
 if TYPE_CHECKING:
     from ales_nrm.observation import ObservingBlock, ObservingSequence
 
 logger = logging.getLogger(__name__)
-
-
-def _get_block_mean_time_seconds(block: "ObservingBlock") -> float:
-    """Compute mean observation time in seconds for a block.
-
-    Parses all timestamps in the block, handles midnight
-    crossing, and returns the arithmetic mean in seconds
-    since midnight (possibly exceeding 86400 for
-    post-midnight observations).
-
-    Args:
-        block: A loaded ObservingBlock with timestamps.
-
-    Returns:
-        Mean time in seconds.
-
-    Raises:
-        ValueError: If no valid timestamps are available.
-    """
-    seconds = _parse_timestamps_to_seconds(block.timestamps)
-    if len(seconds) == 0:
-        raise ValueError(f"Block '{block.target}' has no valid timestamps.")
-    return float(np.mean(seconds))
 
 
 def _validate_raw_extraction(
@@ -130,24 +108,6 @@ def _assemble_observables_for_wavelength(
             )
         rows.append(np.asarray(wl_dict[wl][key]))
     return np.array(rows)
-
-
-def _get_block_times(
-    blocks: list["ObservingBlock"],
-) -> np.ndarray:
-    """Get mean time in seconds for each block.
-
-    Args:
-        blocks: List of loaded ObservingBlocks.
-
-    Returns:
-        1D array of mean times in seconds, shape
-        ``(n_blocks,)``.
-    """
-    times = np.empty(len(blocks))
-    for i, block in enumerate(blocks):
-        times[i] = _get_block_mean_time_seconds(block)
-    return times
 
 
 def _stdout_context(

@@ -24,8 +24,6 @@ from ales_nrm.observables import (
 )
 from ales_nrm.sampy_interface.calibrate import (
     _assemble_observables_for_wavelength,
-    _get_block_mean_time_seconds,
-    _get_block_times,
     _validate_raw_extraction,
     calibrate_block,
     calibrate_sequence,
@@ -216,39 +214,6 @@ def _zero_poly_cal(target, cal, t_times, c_times, order, dtype, **kw):
     )
 
 
-class TestGetBlockMeanTimeSeconds:
-    """Tests for _get_block_mean_time_seconds."""
-
-    def test_simple_timestamps(self):
-        """Computes correct mean for simple timestamps."""
-        block = MagicMock()
-        block.timestamps = np.array(
-            ["08:00:00.000", "08:10:00.000"],
-            dtype=object,
-        )
-        result = _get_block_mean_time_seconds(block)
-        expected = 8 * 3600 + 5 * 60
-        assert result == pytest.approx(expected)
-
-    def test_midnight_crossing(self):
-        """Handles midnight crossing correctly."""
-        block = MagicMock()
-        block.timestamps = np.array(
-            ["23:55:00.000", "00:05:00.000"],
-            dtype=object,
-        )
-        result = _get_block_mean_time_seconds(block)
-        assert result == pytest.approx(86400.0)
-
-    def test_empty_timestamps_raises(self):
-        """Raises ValueError if no valid timestamps."""
-        block = MagicMock()
-        block.target = "test"
-        block.timestamps = np.array([], dtype=object)
-        with pytest.raises(ValueError, match="no valid timestamps"):
-            _get_block_mean_time_seconds(block)
-
-
 class TestValidateRawExtraction:
     """Tests for _validate_raw_extraction."""
 
@@ -343,17 +308,6 @@ class TestAssembleObservablesForWavelength:
             _assemble_observables_for_wavelength(
                 [block], "raw", "cp", "closure_phases", 3.0
             )
-
-
-class TestGetBlockTimes:
-    """Tests for _get_block_times."""
-
-    def test_multiple_blocks(self, mock_sci_block, mock_cal_block_1):
-        """Returns correct times for multiple blocks."""
-        times = _get_block_times([mock_cal_block_1, mock_sci_block])
-        assert times.shape == (2,)
-        expected_cal = 7 * 3600 + 52 * 60 + 30
-        assert times[0] == pytest.approx(expected_cal)
 
 
 class TestCalibrateBlock:
