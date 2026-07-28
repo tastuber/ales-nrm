@@ -992,23 +992,18 @@ class ObservingBlock:
         *,
         source_label: str = "raw",
         output_label: str = "calibrated",
-        calibrate_cp: bool = True,
-        calibrate_vis2: bool = True,
+        calibrate: set[str] | None = None,
         backend: str = "sampy",
         **backend_kwargs: Any,
     ) -> None:
         """Calibrate this block's observables against calibrators.
 
-        Dispatches to the appropriate calibration backend to
-        remove instrumental systematics from closure phases
-        (subtractively) and squared visibilities (divisively).
-        The calibrated result is stored under ``output_label``
-        in ``self.observables``.
-
-        The calibrated ``Observables`` contains only ``vis2``,
-        ``vis2_err``, ``t3phi``, ``t3phi_err``, and flags.
-        Complex visibility fields are not populated (SAMpy, the
-        only current backend, does not calibrate them).
+        Dispatches to the appropriate calibration backend to remove
+        instrumental systematics from closure phases (subtractively),
+        squared visibilities (divisively), visibility phases
+        (subtractively), and visibility amplitudes (divisively). The
+        calibrated result is stored under ``output_label`` in
+        ``self.observables``.
 
         Args:
             calibrator_blocks: One or more ObservingBlocks to
@@ -1020,12 +1015,12 @@ class ObservingBlock:
             output_label: Label under which to store the
                 calibrated ``Observables``. Default
                 ``'calibrated'``.
-            calibrate_cp: If True, calibrate closure phases.
-                Default True.
-            calibrate_vis2: If True, calibrate squared
-                visibilities. Default True.
-            backend: Calibration backend name. Currently
-                supported: ``'sampy'``.
+            calibrate: Set of observable keys to calibrate. Valid keys
+                are ``'t3phi'``, ``'vis2'``, ``'visphi'``, and
+                ``'visamp'``. ``None`` (default) calibrates all four.
+                Empty set raises ``ValueError``.
+            backend: Calibration backend name. Supported:
+                ``'sampy'``, ``'native'``.
             **backend_kwargs: Backend-specific keyword
                 arguments passed directly to the backend
                 calibration function.
@@ -1038,15 +1033,19 @@ class ObservingBlock:
             display (bool): Show SAMpy calibration diagnostic
                 plots. Default False.
             suppress_sampy_prints (bool): If True (default),
-            suppress stdout print statements from SAMpy's
-            ``polynomial_calibrate``. Set to False to allow
-            SAMpy's diagnostic output to pass through.
+                suppress stdout print statements from SAMpy's
+                ``polynomial_calibrate``.
+
+        Backend-specific kwargs for ``backend='native'``:
+            method (str): Calibration model. ``'constant'``
+                (zeroth-order) or ``'linear'`` (first-order).
+                Default ``'constant'``.
 
         Raises:
             RuntimeError: If this block has not been loaded.
-            ValueError: If backend is not recognized, or if
-                calibrator blocks lack required extractions.
-            ImportError: If SAMpy is not installed.
+            ValueError: If backend is not recognized, if
+                ``calibrate`` contains invalid keys, or if
+                ``calibrate`` is an empty set.
         """
         if not self.is_loaded:
             raise RuntimeError(
@@ -1059,22 +1058,62 @@ class ObservingBlock:
         if not isinstance(calibrator_blocks, list):
             calibrator_blocks = [calibrator_blocks]
 
+        # Resolve calibrate set
+        _valid_observables = frozenset({"t3phi", "vis2", "visphi", "visamp"})
+        if calibrate is None:
+            calibrate_set = set(_valid_observables)
+        else:
+            calibrate_set = set(calibrate)
+            if not calibrate_set:
+                raise ValueError("calibrate set must not be empty.")
+            invalid = calibrate_set - _valid_observables
+            if invalid:
+                raise ValueError(
+                    f"Invalid observable keys: "
+                    f"{sorted(invalid)}. Valid keys: "
+                    f"{sorted(_valid_observables)}."
+                )
+
         if backend == "sampy":
             from ales_nrm.sampy_interface.calibrate import (
                 calibrate_block,
             )
 
+            # Warn if unsupported observables requested
+            unsupported = calibrate_set & {"visphi", "visamp"}
+            if unsupported:
+                warnings.warn(
+                    "SAMpy backend does not support calibrating "
+                    f"{sorted(unsupported)}. These will be skipped.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+
+            # Translate to SAMpy's parameters
             cal_obs = calibrate_block(
                 self,
                 calibrator_blocks,
                 source_label=source_label,
-                calibrate_cp=calibrate_cp,
-                calibrate_vis2=calibrate_vis2,
+                calibrate_cp="t3phi" in calibrate_set,
+                calibrate_vis2="vis2" in calibrate_set,
+                **backend_kwargs,
+            )
+        elif backend == "native":
+            from ales_nrm.calibrate import (
+                calibrate_block as _native_cal,
+            )
+
+            cal_obs = _native_cal(
+                self,
+                calibrator_blocks,
+                source_label=source_label,
+                calibrate=calibrate_set,
                 **backend_kwargs,
             )
         else:
             raise ValueError(
-                f"Unknown calibration backend '{backend}'. Supported: 'sampy'."
+                f"Unknown calibration backend '{backend}'. "
+                f"Supported: 'sampy', 'native'."
             )
 
         self.observables[output_label] = cal_obs

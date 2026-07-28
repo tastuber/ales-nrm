@@ -213,6 +213,15 @@ class TestCalibrateObservables:
                 backend="nonexistent",
             )
 
+    def test_unknown_backend_mentions_both(self, sci_block):
+        """Error message mentions both 'sampy' and 'native'."""
+        sci_block.load()
+        with pytest.raises(ValueError, match="'sampy', 'native'"):
+            sci_block.calibrate_observables(
+                calibrator_blocks=[MagicMock()],
+                backend="nonexistent",
+            )
+
     def test_normalizes_single_calibrator(self, sci_block, sample_directory):
         """Single calibrator (not list) is normalized to list."""
         sci_block.load()
@@ -222,7 +231,10 @@ class TestCalibrateObservables:
             "ales_nrm.sampy_interface.calibrate.calibrate_block",
             return_value=mock_cal_obs,
         ) as mock_cb:
-            sci_block.calibrate_observables(calibrator_blocks=MagicMock())
+            sci_block.calibrate_observables(
+                calibrator_blocks=MagicMock(),
+                calibrate={"t3phi", "vis2"},
+            )
 
         # calibrate_block received a list
         call_args = mock_cb.call_args
@@ -242,6 +254,7 @@ class TestCalibrateObservables:
             sci_block.calibrate_observables(
                 calibrator_blocks=[MagicMock()],
                 output_label="my_cal",
+                calibrate={"t3phi", "vis2"},
             )
 
         assert "my_cal" in sci_block.observables
@@ -258,6 +271,7 @@ class TestCalibrateObservables:
         ) as mock_cb:
             sci_block.calibrate_observables(
                 calibrator_blocks=[MagicMock()],
+                calibrate={"t3phi", "vis2"},
                 poly_order=2,
                 display=True,
             )
@@ -267,7 +281,7 @@ class TestCalibrateObservables:
         assert call_kwargs["display"] is True
 
     def test_calibrate_flags_forwarded(self, sci_block):
-        """calibrate_cp and calibrate_vis2 forwarded."""
+        """calibrate={'vis2'} translates to correct SAMpy flags."""
         sci_block.load()
 
         mock_cal_obs = MagicMock()
@@ -277,8 +291,7 @@ class TestCalibrateObservables:
         ) as mock_cb:
             sci_block.calibrate_observables(
                 calibrator_blocks=[MagicMock()],
-                calibrate_cp=False,
-                calibrate_vis2=True,
+                calibrate={"vis2"},
             )
 
         call_kwargs = mock_cb.call_args[1]
@@ -296,9 +309,132 @@ class TestCalibrateObservables:
         ) as mock_cb:
             sci_block.calibrate_observables(
                 calibrator_blocks=[MagicMock()],
+                calibrate={"t3phi", "vis2"},
             )
 
         mock_cb.assert_called_once()
+
+    def test_calibrate_none_means_all(self, sci_block):
+        """calibrate=None passes cp=True, vis2=True to SAMpy."""
+        sci_block.load()
+
+        mock_cal_obs = MagicMock()
+        with patch(
+            "ales_nrm.sampy_interface.calibrate.calibrate_block",
+            return_value=mock_cal_obs,
+        ) as mock_cb:
+            with pytest.warns(UserWarning, match="does not support"):
+                sci_block.calibrate_observables(
+                    calibrator_blocks=[MagicMock()],
+                    calibrate=None,
+                )
+
+        call_kwargs = mock_cb.call_args[1]
+        assert call_kwargs["calibrate_cp"] is True
+        assert call_kwargs["calibrate_vis2"] is True
+
+    def test_calibrate_invalid_key_raises(self, sci_block):
+        """calibrate={'invalid'} raises ValueError."""
+        sci_block.load()
+        with pytest.raises(ValueError, match="Invalid observable"):
+            sci_block.calibrate_observables(
+                calibrator_blocks=[MagicMock()],
+                calibrate={"invalid"},
+            )
+
+    def test_calibrate_empty_set_raises(self, sci_block):
+        """calibrate=set() raises ValueError."""
+        sci_block.load()
+        with pytest.raises(ValueError, match="must not be empty"):
+            sci_block.calibrate_observables(
+                calibrator_blocks=[MagicMock()],
+                calibrate=set(),
+            )
+
+    def test_sampy_unsupported_warns(self, sci_block):
+        """calibrate={'visphi'} with sampy issues UserWarning."""
+        sci_block.load()
+
+        mock_cal_obs = MagicMock()
+        with patch(
+            "ales_nrm.sampy_interface.calibrate.calibrate_block",
+            return_value=mock_cal_obs,
+        ):
+            with pytest.warns(UserWarning, match="does not support"):
+                sci_block.calibrate_observables(
+                    calibrator_blocks=[MagicMock()],
+                    calibrate={"visphi"},
+                )
+
+    def test_sampy_translate_calibrate_set(self, sci_block):
+        """calibrate={'t3phi', 'vis2'} -> cp=True, vis2=True."""
+        sci_block.load()
+
+        mock_cal_obs = MagicMock()
+        with patch(
+            "ales_nrm.sampy_interface.calibrate.calibrate_block",
+            return_value=mock_cal_obs,
+        ) as mock_cb:
+            sci_block.calibrate_observables(
+                calibrator_blocks=[MagicMock()],
+                calibrate={"t3phi", "vis2"},
+            )
+
+        call_kwargs = mock_cb.call_args[1]
+        assert call_kwargs["calibrate_cp"] is True
+        assert call_kwargs["calibrate_vis2"] is True
+
+    def test_sampy_translate_vis2_only(self, sci_block):
+        """calibrate={'vis2'} -> cp=False, vis2=True."""
+        sci_block.load()
+
+        mock_cal_obs = MagicMock()
+        with patch(
+            "ales_nrm.sampy_interface.calibrate.calibrate_block",
+            return_value=mock_cal_obs,
+        ) as mock_cb:
+            sci_block.calibrate_observables(
+                calibrator_blocks=[MagicMock()],
+                calibrate={"vis2"},
+            )
+
+        call_kwargs = mock_cb.call_args[1]
+        assert call_kwargs["calibrate_cp"] is False
+        assert call_kwargs["calibrate_vis2"] is True
+
+    def test_native_backend_dispatches(self, sci_block):
+        """backend='native' dispatches to calibrate module."""
+        sci_block.load()
+
+        mock_cal_obs = MagicMock()
+        with patch(
+            "ales_nrm.calibrate.calibrate_block",
+            return_value=mock_cal_obs,
+        ) as mock_cb:
+            sci_block.calibrate_observables(
+                calibrator_blocks=[MagicMock()],
+                backend="native",
+            )
+
+        mock_cb.assert_called_once()
+
+    def test_native_method_kwarg_forwarded(self, sci_block):
+        """method='linear' forwarded via backend_kwargs."""
+        sci_block.load()
+
+        mock_cal_obs = MagicMock()
+        with patch(
+            "ales_nrm.calibrate.calibrate_block",
+            return_value=mock_cal_obs,
+        ) as mock_cb:
+            sci_block.calibrate_observables(
+                calibrator_blocks=[MagicMock()],
+                backend="native",
+                method="linear",
+            )
+
+        call_kwargs = mock_cb.call_args[1]
+        assert call_kwargs["method"] == "linear"
 
 
 class TestObservingBlockValidation:
