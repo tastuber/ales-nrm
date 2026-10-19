@@ -33,6 +33,10 @@ pip install -e . --group=dev
 
 The project is in early development. If you would like to get involved, please contact [the owner](mailto:tstuber@arizona.edu).
 
+## Citation
+
+If you use this package in your research, please cite the SPIE proceedings paper of [Stuber et al. 2026](https://www.spiedigitallibrary.org/conference-proceedings-of-spie/14148/141480E/Spectrally-dispersed-non-redundant-aperture-masking-interferometry-in-the-thermal/10.1117/12.3103092.full).
+
 ## Further reading
 
 - ALES: [Skemer et al. 2018](https://ui.adsabs.harvard.edu/abs/2018SPIE10702E..0CS/abstract), [Stone et al. 2022](https://www.spiedigitallibrary.org/conference-proceedings-of-spie/12184/2630308/On-sky-performance-and-results-of-the-recently-upgraded-ALES/10.1117/12.2630308.full)
