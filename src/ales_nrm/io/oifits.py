@@ -333,7 +333,7 @@ def _build_primary_hdu(
         "Institution",
     )
 
-    now = datetime.datetime.now(tz=datetime.timezone.utc)
+    now = datetime.datetime.now(tz=datetime.UTC)
     header["DATE"] = (
         now.strftime("%Y-%m-%dT%H:%M:%S"),
         "File creation date",
