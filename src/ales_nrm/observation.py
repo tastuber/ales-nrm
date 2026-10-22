@@ -994,6 +994,8 @@ class ObservingBlock:
         output_label: str = "calibrated",
         calibrate: set[str] | None = None,
         backend: str = "sampy",
+        scatter_blocks: "list[ObservingBlock] | None" = None,
+        scatter_label: str = "raw",
         **backend_kwargs: Any,
     ) -> None:
         """Calibrate this block's observables against calibrators.
@@ -1004,6 +1006,12 @@ class ObservingBlock:
         (subtractively), and visibility amplitudes (divisively). The
         calibrated result is stored under ``output_label`` in
         ``self.observables``.
+
+        Optionally, the propagated uncertainties can be replaced by
+        the scatter (standard deviation) of raw observables across
+        a set of ``scatter_blocks``. This provides a conservative
+        uncertainty estimate based on the block-to-block variability
+        of calibrator observations, independent of frame-level noise.
 
         Args:
             calibrator_blocks: One or more ObservingBlocks to
@@ -1021,6 +1029,16 @@ class ObservingBlock:
                 Empty set raises ``ValueError``.
             backend: Calibration backend name. Supported:
                 ``'sampy'``, ``'native'``.
+            scatter_blocks: Optional list of ObservingBlocks
+                whose raw observables provide a scatter-based
+                uncertainty estimate. When provided (native
+                backend only), the uncertainties on the
+                calibrated output are overwritten with the
+                standard deviation across these blocks.
+                Requires at least 2 blocks.
+            scatter_label: Label under which to find
+                observables on each scatter block. Default
+                ``'raw'``.
             **backend_kwargs: Backend-specific keyword
                 arguments passed directly to the backend
                 calibration function.
@@ -1044,14 +1062,22 @@ class ObservingBlock:
         Raises:
             RuntimeError: If this block has not been loaded.
             ValueError: If backend is not recognized, if
-                ``calibrate`` contains invalid keys, or if
-                ``calibrate`` is an empty set.
+                ``calibrate`` contains invalid keys, if
+                ``calibrate`` is an empty set, or if
+                ``scatter_blocks`` is used with a non-native
+                backend.
         """
         if not self.is_loaded:
             raise RuntimeError(
                 f"Block '{self.target}' "
                 f"({self.block_type.value}) has not been "
                 f"loaded. Call load() first."
+            )
+
+        # Validate scatter_blocks + backend combination
+        if scatter_blocks is not None and backend != "native":
+            raise ValueError(
+                "scatter_blocks is only supported with backend='native'."
             )
 
         # Normalize to list
@@ -1110,6 +1136,19 @@ class ObservingBlock:
                 calibrate=calibrate_set,
                 **backend_kwargs,
             )
+
+            # Apply scatter-based uncertainties if requested
+            if scatter_blocks is not None:
+                from ales_nrm.calibrate import (
+                    compute_scatter_uncertainties,
+                )
+
+                compute_scatter_uncertainties(
+                    cal_obs,
+                    scatter_blocks,
+                    scatter_label=scatter_label,
+                    calibrate=calibrate_set,
+                )
         else:
             raise ValueError(
                 f"Unknown calibration backend '{backend}'. "

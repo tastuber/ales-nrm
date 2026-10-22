@@ -436,6 +436,92 @@ class TestCalibrateObservables:
         call_kwargs = mock_cb.call_args[1]
         assert call_kwargs["method"] == "linear"
 
+    def test_scatter_blocks_non_native_raises(self, sci_block):
+        """scatter_blocks with non-native backend raises."""
+        sci_block.load()
+        with pytest.raises(ValueError, match="only supported with.*native"):
+            sci_block.calibrate_observables(
+                calibrator_blocks=[MagicMock()],
+                backend="sampy",
+                scatter_blocks=[MagicMock(), MagicMock()],
+                calibrate={"t3phi", "vis2"},
+            )
+
+    def test_scatter_blocks_none_unchanged(self, sci_block):
+        """scatter_blocks=None preserves propagated errors."""
+        sci_block.load()
+
+        mock_cal_obs = MagicMock()
+        with patch(
+            "ales_nrm.calibrate.calibrate_block",
+            return_value=mock_cal_obs,
+        ):
+            sci_block.calibrate_observables(
+                calibrator_blocks=[MagicMock()],
+                backend="native",
+                scatter_blocks=None,
+            )
+
+        # compute_scatter_uncertainties not called
+        assert sci_block.observables["calibrated"] is mock_cal_obs
+
+    def test_scatter_blocks_calls_compute(self, sci_block):
+        """scatter_blocks triggers compute_scatter_uncertainties."""
+        sci_block.load()
+
+        mock_cal_obs = MagicMock()
+        scatter = [MagicMock(), MagicMock()]
+
+        with (
+            patch(
+                "ales_nrm.calibrate.calibrate_block",
+                return_value=mock_cal_obs,
+            ),
+            patch(
+                "ales_nrm.calibrate.compute_scatter_uncertainties",
+            ) as mock_scatter,
+        ):
+            sci_block.calibrate_observables(
+                calibrator_blocks=[MagicMock()],
+                backend="native",
+                scatter_blocks=scatter,
+                scatter_label="my_label",
+                calibrate={"t3phi"},
+            )
+
+        mock_scatter.assert_called_once_with(
+            mock_cal_obs,
+            scatter,
+            scatter_label="my_label",
+            calibrate={"t3phi"},
+        )
+
+    def test_scatter_blocks_custom_label_forwarded(self, sci_block):
+        """scatter_label is forwarded to compute function."""
+        sci_block.load()
+
+        mock_cal_obs = MagicMock()
+        scatter = [MagicMock(), MagicMock()]
+
+        with (
+            patch(
+                "ales_nrm.calibrate.calibrate_block",
+                return_value=mock_cal_obs,
+            ),
+            patch(
+                "ales_nrm.calibrate.compute_scatter_uncertainties",
+            ) as mock_scatter,
+        ):
+            sci_block.calibrate_observables(
+                calibrator_blocks=[MagicMock()],
+                backend="native",
+                scatter_blocks=scatter,
+                scatter_label="special",
+            )
+
+        call_kwargs = mock_scatter.call_args[1]
+        assert call_kwargs["scatter_label"] == "special"
+
 
 class TestObservingBlockValidation:
     """Tests for file validation after loading."""

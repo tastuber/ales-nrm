@@ -11,6 +11,7 @@ from ales_nrm.calibrate import (
     _get_calibration_values_constant,
     _get_calibration_values_linear,
     calibrate_block,
+    compute_scatter_uncertainties,
 )
 from ales_nrm.observables import (
     BaselineInfo,
@@ -1226,3 +1227,319 @@ class TestCalibrateBlockLinear:
                 [cal_block],
                 calibrate={"vis2"},
             )
+
+
+class TestComputeScatterUncertainties:
+    """Tests for compute_scatter_uncertainties."""
+
+    def _make_scatter_block(
+        self,
+        target="cal",
+        t3phi_val=None,
+        vis2_val=None,
+        visphi_val=None,
+        visamp_val=None,
+        n_bl=3,
+        n_tri=1,
+        n_wav=2,
+        label="raw",
+    ):
+        """Create a mock block with observables for scatter."""
+        obs = _make_observables(
+            target=target,
+            n_baselines=n_bl,
+            n_triangles=n_tri,
+            n_wav=n_wav,
+            t3phi=t3phi_val,
+            t3phi_err=(
+                np.ones((n_tri, n_wav)) if t3phi_val is not None else None
+            ),
+            vis2=vis2_val,
+            vis2_err=(
+                np.ones((n_bl, n_wav)) if vis2_val is not None else None
+            ),
+            visphi=visphi_val,
+            visphi_err=(
+                np.ones((n_bl, n_wav)) if visphi_val is not None else None
+            ),
+            visamp=visamp_val,
+            visamp_err=(
+                np.ones((n_bl, n_wav)) if visamp_val is not None else None
+            ),
+        )
+        return _make_block(target=target, obs=obs, source_label=label)
+
+    def test_subtraction_direct_std(self):
+        """Subtraction observables get direct std as error."""
+        _n_tri, _n_wav = 1, 2
+        # Three scatter blocks with known t3phi values
+        vals = [
+            np.array([[10.0, 20.0]]),
+            np.array([[12.0, 22.0]]),
+            np.array([[14.0, 24.0]]),
+        ]
+        scatter_blocks = [self._make_scatter_block(t3phi_val=v) for v in vals]
+
+        # Calibrated obs with placeholder errors
+        cal_obs = _make_observables(
+            t3phi=np.array([[5.0, 7.0]]),
+            t3phi_err=np.array([[99.0, 99.0]]),
+        )
+
+        compute_scatter_uncertainties(
+            cal_obs, scatter_blocks, calibrate={"t3phi"}
+        )
+
+        stacked = np.stack(vals, axis=0)
+        expected = np.std(stacked, axis=0, ddof=1)
+        np.testing.assert_allclose(cal_obs.t3phi_err, expected)
+
+    def test_division_relative_scatter(self):
+        """Division observables get relative scatter * |cal_val|."""
+        n_bl, n_wav = 3, 2
+        vals = [
+            np.full((n_bl, n_wav), 0.90),
+            np.full((n_bl, n_wav), 0.95),
+            np.full((n_bl, n_wav), 1.00),
+        ]
+        scatter_blocks = [self._make_scatter_block(vis2_val=v) for v in vals]
+
+        calibrated_value = np.full((n_bl, n_wav), 0.85)
+        cal_obs = _make_observables(
+            vis2=calibrated_value,
+            vis2_err=np.full((n_bl, n_wav), 99.0),
+        )
+
+        compute_scatter_uncertainties(
+            cal_obs, scatter_blocks, calibrate={"vis2"}
+        )
+
+        stacked = np.stack(vals, axis=0)
+        std_v = np.std(stacked, axis=0, ddof=1)
+        mean_v = np.mean(stacked, axis=0)
+        expected = (std_v / np.abs(mean_v)) * np.abs(calibrated_value)
+        np.testing.assert_allclose(cal_obs.vis2_err, expected)
+
+    def test_requires_at_least_two_blocks(self):
+        """Raises ValueError with fewer than 2 scatter blocks."""
+        n_tri, n_wav = 1, 2
+        scatter_blocks = [
+            self._make_scatter_block(t3phi_val=np.ones((n_tri, n_wav)))
+        ]
+        cal_obs = _make_observables(
+            t3phi=np.ones((n_tri, n_wav)),
+            t3phi_err=np.ones((n_tri, n_wav)),
+        )
+
+        with pytest.raises(ValueError, match="At least 2"):
+            compute_scatter_uncertainties(
+                cal_obs, scatter_blocks, calibrate={"t3phi"}
+            )
+
+    def test_missing_scatter_label_raises(self):
+        """Raises ValueError when scatter_label missing."""
+        n_tri, n_wav = 1, 2
+        block = self._make_scatter_block(
+            t3phi_val=np.ones((n_tri, n_wav)), label="raw"
+        )
+        blocks = [block, block]
+        cal_obs = _make_observables(
+            t3phi=np.ones((n_tri, n_wav)),
+            t3phi_err=np.ones((n_tri, n_wav)),
+        )
+
+        with pytest.raises(ValueError, match="scatter_label"):
+            compute_scatter_uncertainties(
+                cal_obs,
+                blocks,
+                scatter_label="nonexistent",
+                calibrate={"t3phi"},
+            )
+
+    def test_custom_scatter_label(self):
+        """Uses scatter_label to find observables."""
+        _n_tri, _n_wav = 1, 2
+        vals = [
+            np.array([[5.0, 6.0]]),
+            np.array([[7.0, 8.0]]),
+        ]
+        scatter_blocks = [
+            self._make_scatter_block(t3phi_val=v, label="custom") for v in vals
+        ]
+
+        cal_obs = _make_observables(
+            t3phi=np.array([[3.0, 4.0]]),
+            t3phi_err=np.array([[99.0, 99.0]]),
+        )
+
+        compute_scatter_uncertainties(
+            cal_obs,
+            scatter_blocks,
+            scatter_label="custom",
+            calibrate={"t3phi"},
+        )
+
+        stacked = np.stack(vals, axis=0)
+        expected = np.std(stacked, axis=0, ddof=1)
+        np.testing.assert_allclose(cal_obs.t3phi_err, expected)
+
+    def test_selective_calibrate_only_requested(self):
+        """Only overwrites errors for requested keys."""
+        n_bl, n_tri, n_wav = 3, 1, 2
+        vals_t3 = [
+            np.array([[10.0, 20.0]]),
+            np.array([[12.0, 22.0]]),
+        ]
+        vals_v2 = [
+            np.full((n_bl, n_wav), 0.9),
+            np.full((n_bl, n_wav), 1.0),
+        ]
+        scatter_blocks = []
+        for t3, v2 in zip(vals_t3, vals_v2, strict=False):
+            obs = _make_observables(
+                target="cal",
+                t3phi=t3,
+                t3phi_err=np.ones((n_tri, n_wav)),
+                vis2=v2,
+                vis2_err=np.ones((n_bl, n_wav)),
+            )
+            scatter_blocks.append(_make_block(target="cal", obs=obs))
+
+        original_vis2_err = np.full((n_bl, n_wav), 99.0)
+        cal_obs = _make_observables(
+            t3phi=np.array([[5.0, 7.0]]),
+            t3phi_err=np.array([[99.0, 99.0]]),
+            vis2=np.full((n_bl, n_wav), 0.85),
+            vis2_err=original_vis2_err.copy(),
+        )
+
+        # Only calibrate t3phi
+        compute_scatter_uncertainties(
+            cal_obs, scatter_blocks, calibrate={"t3phi"}
+        )
+
+        # t3phi_err should be changed
+        assert not np.allclose(cal_obs.t3phi_err, 99.0)
+        # vis2_err should be unchanged
+        np.testing.assert_allclose(cal_obs.vis2_err, 99.0)
+
+    def test_missing_observable_on_scatter_block_raises(self):
+        """Raises ValueError when scatter block lacks observable."""
+        n_bl, n_wav = 3, 2
+        # First block has vis2, second does not
+        block1 = self._make_scatter_block(vis2_val=np.full((n_bl, n_wav), 0.9))
+        block2 = self._make_scatter_block(vis2_val=None)
+
+        cal_obs = _make_observables(
+            vis2=np.full((n_bl, n_wav), 0.85),
+            vis2_err=np.full((n_bl, n_wav), 0.01),
+        )
+
+        with pytest.raises(ValueError, match="missing observable"):
+            compute_scatter_uncertainties(
+                cal_obs, [block1, block2], calibrate={"vis2"}
+            )
+
+    def test_skips_none_calibrated_value(self):
+        """Skips observables not present on calibrated_obs."""
+        _n_tri, _n_wav = 1, 2
+        vals = [
+            np.array([[10.0, 20.0]]),
+            np.array([[12.0, 22.0]]),
+        ]
+        scatter_blocks = [self._make_scatter_block(t3phi_val=v) for v in vals]
+
+        # cal_obs has no t3phi
+        cal_obs = _make_observables()
+
+        # Should not raise
+        compute_scatter_uncertainties(
+            cal_obs, scatter_blocks, calibrate={"t3phi"}
+        )
+        assert cal_obs.t3phi_err is None
+
+    def test_empty_calibrate_set_raises(self):
+        """Empty calibrate set raises ValueError."""
+        scatter_blocks = [
+            self._make_scatter_block(t3phi_val=np.ones((1, 2)))
+            for _ in range(2)
+        ]
+        cal_obs = _make_observables(
+            t3phi=np.ones((1, 2)),
+            t3phi_err=np.ones((1, 2)),
+        )
+
+        with pytest.raises(ValueError, match="must not be empty"):
+            compute_scatter_uncertainties(
+                cal_obs, scatter_blocks, calibrate=set()
+            )
+
+    def test_invalid_calibrate_key_raises(self):
+        """Invalid key in calibrate raises ValueError."""
+        scatter_blocks = [
+            self._make_scatter_block(t3phi_val=np.ones((1, 2)))
+            for _ in range(2)
+        ]
+        cal_obs = _make_observables(
+            t3phi=np.ones((1, 2)),
+            t3phi_err=np.ones((1, 2)),
+        )
+
+        with pytest.raises(ValueError, match="Invalid observable"):
+            compute_scatter_uncertainties(
+                cal_obs, scatter_blocks, calibrate={"bad_key"}
+            )
+
+    def test_calibrate_none_defaults_to_all(self):
+        """calibrate=None overwrites errors for all observables."""
+        n_bl, n_tri, n_wav = 3, 1, 2
+        vals_t3 = [
+            np.array([[10.0, 20.0]]),
+            np.array([[12.0, 22.0]]),
+        ]
+        vals_v2 = [
+            np.full((n_bl, n_wav), 0.90),
+            np.full((n_bl, n_wav), 1.00),
+        ]
+        vals_vp = [
+            np.full((n_bl, n_wav), 5.0),
+            np.full((n_bl, n_wav), 7.0),
+        ]
+        vals_va = [
+            np.full((n_bl, n_wav), 0.88),
+            np.full((n_bl, n_wav), 0.92),
+        ]
+        scatter_blocks = []
+        for i in range(2):
+            obs = _make_observables(
+                target="cal",
+                t3phi=vals_t3[i],
+                t3phi_err=np.ones((n_tri, n_wav)),
+                vis2=vals_v2[i],
+                vis2_err=np.ones((n_bl, n_wav)),
+                visphi=vals_vp[i],
+                visphi_err=np.ones((n_bl, n_wav)),
+                visamp=vals_va[i],
+                visamp_err=np.ones((n_bl, n_wav)),
+            )
+            scatter_blocks.append(_make_block(target="cal", obs=obs))
+
+        cal_obs = _make_observables(
+            t3phi=np.array([[5.0, 7.0]]),
+            t3phi_err=np.array([[99.0, 99.0]]),
+            vis2=np.full((n_bl, n_wav), 0.85),
+            vis2_err=np.full((n_bl, n_wav), 99.0),
+            visphi=np.full((n_bl, n_wav), 3.0),
+            visphi_err=np.full((n_bl, n_wav), 99.0),
+            visamp=np.full((n_bl, n_wav), 0.80),
+            visamp_err=np.full((n_bl, n_wav), 99.0),
+        )
+
+        # calibrate=None means all four
+        compute_scatter_uncertainties(cal_obs, scatter_blocks)
+
+        # All errors should be overwritten (no longer 99.0)
+        assert not np.allclose(cal_obs.t3phi_err, 99.0)
+        assert not np.allclose(cal_obs.vis2_err, 99.0)
+        assert not np.allclose(cal_obs.visphi_err, 99.0)
+        assert not np.allclose(cal_obs.visamp_err, 99.0)

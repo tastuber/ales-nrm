@@ -257,7 +257,7 @@ def _linear_interpolation_two(
 
     value = (1.0 - f) * cal_values[0] + f * cal_values[1]
     error = np.sqrt(
-        (1.0 - f)**2 * cal_errors[0]**2 + f**2 * cal_errors[1]**2
+        (1.0 - f) ** 2 * cal_errors[0] ** 2 + f**2 * cal_errors[1] ** 2
     )
 
     return value, error
@@ -554,3 +554,116 @@ def calibrate_block(
     )
 
     return result
+
+
+def compute_scatter_uncertainties(
+    calibrated_obs: "Observables",
+    scatter_blocks: list["ObservingBlock"],
+    *,
+    scatter_label: str = "raw",
+    calibrate: set[str] | None = None,
+) -> None:
+    """Overwrite uncertainties with scatter across blocks.
+
+    For each requested observable, computes the standard deviation
+    of the raw values from ``scatter_blocks`` (per baseline/triangle,
+    per wavelength) and uses it as the uncertainty on
+    ``calibrated_obs``.
+
+    For subtraction-type observables (closure phases, visibility
+    phases), the uncertainty is the direct standard deviation.
+    For division-type observables (squared visibilities, visibility
+    amplitudes), a relative scatter treatment is applied:
+    ``uncertainty = std/|mean| * |calibrated_value|``.
+
+    Args:
+        calibrated_obs: The calibrated Observables whose error
+            fields will be overwritten in-place.
+        scatter_blocks: List of ObservingBlocks providing the
+            scatter estimate. Must contain at least 2 blocks.
+        scatter_label: Label under which to find observables
+            on each scatter block. Default ``"raw"``.
+        calibrate: Set of observable keys for which to
+            overwrite uncertainties. ``None`` means all four.
+            Must be a non-empty subset of
+            ``{'t3phi', 'vis2', 'visphi', 'visamp'}``.
+
+    Raises:
+        ValueError: If fewer than 2 scatter blocks are
+            provided, if ``scatter_label`` is missing on a
+            block, if ``calibrate`` is invalid, or if a
+            required observable is missing on a scatter block.
+    """
+    # Resolve calibrate set
+    if calibrate is None:
+        calibrate_set = set(_VALID_OBSERVABLES)
+    else:
+        calibrate_set = set(calibrate)
+        if not calibrate_set:
+            raise ValueError("calibrate set must not be empty.")
+        invalid = calibrate_set - _VALID_OBSERVABLES
+        if invalid:
+            raise ValueError(
+                f"Invalid observable keys: {sorted(invalid)}. "
+                f"Valid keys: {sorted(_VALID_OBSERVABLES)}."
+            )
+
+    if len(scatter_blocks) < 2:
+        raise ValueError(
+            "At least 2 scatter blocks are required for "
+            "scatter-based uncertainty estimation, but "
+            f"only {len(scatter_blocks)} provided."
+        )
+
+    # Validate scatter_label on each block
+    for i, block in enumerate(scatter_blocks):
+        if scatter_label not in block.observables:
+            raise ValueError(
+                f"scatter_label '{scatter_label}' not found "
+                f"in scatter block {i} "
+                f"(target='{block.target}'). Available: "
+                f"{list(block.observables.keys())}."
+            )
+
+    for key in calibrate_set:
+        attr_map = _OBS_ATTR_MAP[key]
+        value_attr = attr_map["value"]
+        error_attr = attr_map["error"]
+
+        # Check calibrated_obs has the value
+        cal_value = getattr(calibrated_obs, value_attr)
+        if cal_value is None:
+            continue
+
+        # Gather values from scatter blocks
+        scatter_values = []
+        for i, block in enumerate(scatter_blocks):
+            obs = block.observables[scatter_label]
+            val = getattr(obs, value_attr)
+            if val is None:
+                raise ValueError(
+                    f"Scatter block {i} "
+                    f"(target='{block.target}') is "
+                    f"missing observable '{key}'."
+                )
+            scatter_values.append(val)
+
+        # Stack: (n_blocks, n_obs, n_wav)
+        stacked = np.stack(scatter_values, axis=0)
+
+        if key in _SUBTRACTION_OBSERVABLES:
+            # Direct std
+            uncertainty = np.std(stacked, axis=0, ddof=1)
+        else:
+            # Relative scatter: std/|mean| * |calibrated|
+            std_vals = np.std(stacked, axis=0, ddof=1)
+            mean_vals = np.mean(stacked, axis=0)
+            with np.errstate(divide="ignore", invalid="ignore"):
+                rel_scatter = np.where(
+                    np.abs(mean_vals) > 0,
+                    std_vals / np.abs(mean_vals),
+                    np.nan,
+                )
+            uncertainty = rel_scatter * np.abs(cal_value)
+
+        setattr(calibrated_obs, error_attr, uncertainty)
