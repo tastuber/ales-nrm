@@ -186,3 +186,34 @@ def _get_block_times(
     for i, block in enumerate(blocks):
         times[i] = _get_block_mean_time_seconds(block)
     return times
+
+
+def _unwrap_block_times(times: np.ndarray) -> np.ndarray:
+    """Unwrap chronologically ordered block times across midnight.
+
+    A block whose time is more than 12 h earlier than the last finite
+    (already corrected) block time is shifted by +86400 s, as are all
+    following blocks. NaN entries are passed through and ignored for
+    the comparison.
+
+    Args:
+        times: 1D array of block mean times in seconds, in observing
+            order. Values may already exceed 86400.
+
+    Returns:
+        New 1D float array with cross-block midnight crossings removed.
+    """
+    result = np.array(times, dtype=float, copy=True)
+    offset = 0.0
+    last: float | None = None
+    for i, t in enumerate(result):
+        if not np.isfinite(t):
+            continue
+        corrected = float(t) + offset
+        if last is not None and corrected - last < -43200.0:
+            # Backward jump > 12 h: crossed midnight between blocks
+            offset += 86400.0
+            corrected += 86400.0
+        result[i] = corrected
+        last = corrected
+    return result

@@ -12,6 +12,7 @@ from ales_nrm.utilities import (
     _get_block_times,
     _parse_time_string_to_seconds,
     _parse_timestamps_to_seconds,
+    _unwrap_block_times,
     ensure_odd,
     rotate_points_2d,
 )
@@ -282,3 +283,61 @@ class TestGetBlockTimes:
         times = _get_block_times([block])
         assert times.shape == (1,)
         assert times[0] == pytest.approx(43200.0)
+
+
+class TestUnwrapBlockTimes:
+    """Tests for _unwrap_block_times."""
+
+    def test_no_crossing_unchanged(self):
+        """Monotonic times without crossing are returned unchanged."""
+        times = np.array([28800.0, 30000.0, 32000.0])
+        result = _unwrap_block_times(times)
+        np.testing.assert_allclose(result, times)
+
+    def test_small_backward_jump_not_shifted(self):
+        """Backward jumps shorter than 12 h are not unwrapped."""
+        times = np.array([30000.0, 29000.0])
+        result = _unwrap_block_times(times)
+        np.testing.assert_allclose(result, times)
+
+    def test_crossing_between_blocks(self):
+        """Blocks after a cross-block midnight are shifted."""
+        times = np.array([85800.0, 86100.0, 300.0, 900.0])
+        result = _unwrap_block_times(times)
+        expected = np.array([85800.0, 86100.0, 86700.0, 87300.0])
+        np.testing.assert_allclose(result, expected)
+
+    def test_input_above_day_then_post_midnight(self):
+        """Within-block unwrapped time followed by post-midnight."""
+        times = np.array([86000.0, 86460.0, 600.0])
+        result = _unwrap_block_times(times)
+        expected = np.array([86000.0, 86460.0, 87000.0])
+        np.testing.assert_allclose(result, expected)
+
+    def test_nan_in_middle(self):
+        """NaN in the middle is passed through and ignored."""
+        times = np.array([86000.0, np.nan, 300.0])
+        result = _unwrap_block_times(times)
+        expected = np.array([86000.0, np.nan, 86700.0])
+        np.testing.assert_allclose(result, expected)
+
+    def test_nan_at_start(self):
+        """Leading NaN is passed through and ignored."""
+        times = np.array([np.nan, 86000.0, 300.0])
+        result = _unwrap_block_times(times)
+        expected = np.array([np.nan, 86000.0, 86700.0])
+        np.testing.assert_allclose(result, expected)
+
+    def test_empty(self):
+        """Empty input yields an empty float array."""
+        result = _unwrap_block_times(np.array([]))
+        assert result.shape == (0,)
+        assert result.dtype == np.float64
+
+    def test_input_not_modified(self):
+        """Input array is not modified; a new array is returned."""
+        times = np.array([86000.0, 300.0])
+        original = times.copy()
+        result = _unwrap_block_times(times)
+        np.testing.assert_array_equal(times, original)
+        assert result is not times
