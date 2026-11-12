@@ -1,14 +1,16 @@
 """Band-averaged observable time series and transfer-function plots.
 
-Provides a registry of plottable interferometric observables and a
+Provides a registry of plottable interferometric observables, a
 compute layer that averages an observable over a wavelength band for
-each block of an observing sequence.
+each block of an observing sequence, and a plot layer that shows the
+band-averaged values per triangle or baseline over time. The dashed
+line through the calibrator blocks is the transfer function.
 """
 
 import warnings
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 import numpy as np
 
@@ -18,6 +20,12 @@ from ales_nrm.utilities import (
 )
 
 if TYPE_CHECKING:
+    from matplotlib.axes import Axes
+    from matplotlib.figure import Figure
+    from matplotlib.legend import Legend
+    from matplotlib.text import Text
+    from matplotlib.ticker import Formatter, Locator
+
     from ales_nrm.observation import ObservingBlock
 
 
@@ -381,3 +389,640 @@ def compute_band_averaged_series(
         n_wav_used=n_wav_used,
         wl_range=(wl_lo, wl_hi),
     )
+
+
+_TIME_MODES = ("elapsed", "ut", "index", "index_ut")
+_DEFAULT_COLORS = {"CAL": "tab:blue", "SCI": "tab:orange"}
+_DEFAULT_NAME_LOC = "upper left"
+_SCI_SHADES = ("#f0f0f0", "#e4e4e4")
+_LEGEND_ORDER = ("CAL", "transfer function", "SCI")
+_LAYOUT_PAD_IN = 0.05
+
+
+class _TimeAxis(NamedTuple):
+    """X positions and tick configuration for one time mode.
+
+    Attributes:
+        x: X position per block.
+        label: Default x-axis label.
+        formatter: Major tick formatter, or ``None`` for the default.
+        locator: Major tick locator, or ``None`` for the default.
+        ticklabels: One fixed tick label per block placed at ``x``,
+            or ``None``.
+    """
+
+    x: np.ndarray
+    label: str
+    formatter: "Formatter | None" = None
+    locator: "Locator | None" = None
+    ticklabels: tuple[str, ...] | None = None
+
+
+def _resolve_item(entry: object, names: Sequence[str]) -> int:
+    """Resolve one index or name to an item index.
+
+    Args:
+        entry: Non-negative integer index or item name.
+        names: Item names.
+
+    Returns:
+        Index into ``names``.
+
+    Raises:
+        ValueError: If ``entry`` is a bool, out of range, an unknown
+            name, or of another type.
+    """
+    n_items = len(names)
+    if isinstance(entry, bool):
+        raise ValueError(f"Boolean entries are not allowed: {entry!r}.")
+    if isinstance(entry, int | np.integer):
+        index = int(entry)
+        if 0 <= index < n_items:
+            return index
+        raise ValueError(f"Index {index} out of range for {n_items} item(s).")
+    if isinstance(entry, str):
+        if entry in names:
+            return names.index(entry)
+        raise ValueError(
+            f"Unknown name {entry!r}. Valid names: {list(names)}."
+        )
+    raise ValueError(f"Invalid entry {entry!r}; expected an index or a name.")
+
+
+def _resolve_select(
+    select: Sequence[int | str] | None,
+    names: Sequence[str],
+) -> list[int]:
+    """Resolve a selection of items to indices, preserving order.
+
+    Args:
+        select: ``None`` for all items, or indices and/or names. A
+            single string is treated as one name.
+        names: Item names.
+
+    Returns:
+        List of item indices in selection order.
+
+    Raises:
+        ValueError: If the selection is empty, contains invalid
+            entries, or selects an item twice.
+    """
+    if select is None:
+        return list(range(len(names)))
+    if isinstance(select, str):
+        select = [select]
+    indices = [_resolve_item(entry, names) for entry in select]
+    if not indices:
+        raise ValueError("select must not be empty.")
+    if len(set(indices)) != len(indices):
+        dupes = sorted({names[i] for i in indices if indices.count(i) > 1})
+        raise ValueError(f"Items selected more than once: {dupes}.")
+    return indices
+
+
+def _resolve_name_locs(
+    name_loc: str | dict[int | str, str],
+    names: Sequence[str],
+) -> list[str]:
+    """Return the panel-name location for every item.
+
+    Args:
+        name_loc: One location for all panels, or a mapping from
+            index or name to location. Unmapped items use
+            ``"upper left"``.
+        names: Item names.
+
+    Returns:
+        List of location strings, one per item.
+
+    Raises:
+        ValueError: If a mapping key is not a valid index or name.
+    """
+    if isinstance(name_loc, str):
+        return [name_loc] * len(names)
+    locs = [_DEFAULT_NAME_LOC] * len(names)
+    for key, loc in name_loc.items():
+        locs[_resolve_item(key, names)] = loc
+    return locs
+
+
+def _grid_shape(n_panels: int, n_cols: int | None) -> tuple[int, int]:
+    """Return ``(rows, cols)`` for the panel grid.
+
+    Args:
+        n_panels: Number of panels (at least 1).
+        n_cols: Explicit number of columns, or ``None`` for automatic
+            selection: up to 4 panels in one row, otherwise 4 or 3
+            columns, whichever leaves fewer empty cells (4 on a tie).
+
+    Returns:
+        Tuple ``(rows, cols)``.
+
+    Raises:
+        ValueError: If ``n_cols`` is smaller than 1.
+    """
+    if n_cols is not None:
+        if n_cols < 1:
+            raise ValueError(f"n_cols must be >= 1, got {n_cols}.")
+        cols = n_cols
+    elif n_panels <= 4:
+        cols = n_panels
+    else:
+        cols = min((4, 3), key=lambda c: (-n_panels) % c)
+    return -(-n_panels // cols), cols
+
+
+def _default_figsize(rows: int, cols: int) -> tuple[float, float]:
+    """Return the default figure size in inches for a grid."""
+    return (max(1.8 * cols + 0.8, 4.0), max(1.5 * rows + 1.0, 3.0))
+
+
+def _format_hhmm(seconds: float) -> str:
+    """Format seconds as ``HH:MM`` modulo 24 h; NaN gives ``"--"``."""
+    if not np.isfinite(seconds):
+        return "--"
+    minutes = int(round(float(seconds) / 60.0)) % 1440
+    return f"{minutes // 60:02d}:{minutes % 60:02d}"
+
+
+def _format_hours(hours: float, _pos: int | None = None) -> str:
+    """Tick formatter callback: hours to ``HH:MM`` modulo 24 h."""
+    return _format_hhmm(hours * 3600.0)
+
+
+def _build_time_axis(times_sec: np.ndarray, mode: str) -> _TimeAxis:
+    """Build x positions and tick configuration for a time mode.
+
+    Args:
+        times_sec: Block times in seconds, unwrapped across midnight.
+        mode: ``"elapsed"``, ``"ut"``, ``"index"`` or ``"index_ut"``.
+
+    Returns:
+        The time-axis configuration.
+
+    Raises:
+        ValueError: If ``mode`` is unknown, or if ``mode`` is
+            ``"elapsed"`` or ``"ut"`` and any time is NaN.
+    """
+    from matplotlib.ticker import FuncFormatter, MaxNLocator
+
+    if mode not in _TIME_MODES:
+        raise ValueError(
+            f"Unknown time_mode '{mode}'. Valid modes: {list(_TIME_MODES)}."
+        )
+    times = np.asarray(times_sec, dtype=float)
+    if mode in ("elapsed", "ut") and not np.all(np.isfinite(times)):
+        raise ValueError(
+            f"time_mode='{mode}' requires valid times for all blocks, "
+            "but some are NaN. Use time_mode='index' or 'index_ut'."
+        )
+    if mode == "elapsed":
+        return _TimeAxis(
+            x=(times - times[0]) / 60.0, label="elapsed time (min)"
+        )
+    if mode == "ut":
+        return _TimeAxis(
+            x=times / 3600.0,
+            label="UT (hh:mm)",
+            formatter=FuncFormatter(_format_hours),
+        )
+    index = np.arange(times.size, dtype=float)
+    if mode == "index":
+        return _TimeAxis(
+            x=index,
+            label="block index",
+            locator=MaxNLocator(integer=True),
+        )
+    return _TimeAxis(
+        x=index,
+        label="UT (hh:mm)",
+        ticklabels=tuple(_format_hhmm(t) for t in times),
+    )
+
+
+def _sci_runs(block_types: Sequence[str]) -> list[tuple[int, int]]:
+    """Return inclusive ``(start, end)`` indices of SCI runs."""
+    runs: list[tuple[int, int]] = []
+    start: int | None = None
+    for i, block_type in enumerate(block_types):
+        if block_type == "SCI":
+            if start is None:
+                start = i
+        elif start is not None:
+            runs.append((start, i - 1))
+            start = None
+    if start is not None:
+        runs.append((start, len(block_types) - 1))
+    return runs
+
+
+def _shade_sci_runs(
+    ax: "Axes",
+    x: np.ndarray,
+    runs: list[tuple[int, int]],
+) -> None:
+    """Shade contiguous SCI runs with alternating gray spans.
+
+    Each span is padded by 0.4 times the median positive finite
+    spacing of ``x``, or by 0.5 if no such spacing exists.
+
+    Args:
+        ax: Target axes.
+        x: X position per block.
+        runs: Inclusive ``(start, end)`` block indices per run.
+    """
+    spacing = np.abs(np.diff(np.asarray(x, dtype=float)))
+    spacing = spacing[np.isfinite(spacing) & (spacing > 0)]
+    pad = 0.4 * float(np.median(spacing)) if spacing.size else 0.5
+    for k, (start, end) in enumerate(runs):
+        ax.axvspan(
+            x[start] - pad,
+            x[end] + pad,
+            color=_SCI_SHADES[k % 2],
+            zorder=0,
+        )
+
+
+def _apply_time_axis(ax: "Axes", time_axis: _TimeAxis) -> None:
+    """Apply the tick formatter, locator or labels to an axes."""
+    if time_axis.formatter is not None:
+        ax.xaxis.set_major_formatter(time_axis.formatter)
+    if time_axis.locator is not None:
+        ax.xaxis.set_major_locator(time_axis.locator)
+    if time_axis.ticklabels is not None:
+        ax.set_xticks(
+            time_axis.x,
+            labels=list(time_axis.ticklabels),
+            rotation=45,
+            ha="right",
+        )
+
+
+def _draw_panel(
+    ax: "Axes",
+    x: np.ndarray,
+    values: np.ndarray,
+    errors: np.ndarray,
+    *,
+    is_cal: np.ndarray,
+    is_sci: np.ndarray,
+    plot_cal: bool,
+    plot_sci: bool,
+    errorbars: bool,
+    colors: dict[str, str],
+    sci_runs: list[tuple[int, int]],
+    reference: float | None,
+    name: str,
+    name_loc: str,
+) -> None:
+    """Draw one triangle or baseline panel.
+
+    Args:
+        ax: Target axes.
+        x: X position per block.
+        values: Band-averaged value per block.
+        errors: Error per block.
+        is_cal: Boolean mask of CAL blocks.
+        is_sci: Boolean mask of SCI blocks.
+        plot_cal: Whether to draw CAL points and the transfer
+            function.
+        plot_sci: Whether to draw SCI points.
+        errorbars: Whether to draw error bars.
+        colors: Colors keyed by ``"CAL"`` and ``"SCI"``.
+        sci_runs: SCI runs to shade if both block types are plotted.
+        reference: Reference line value, or ``None`` to omit it.
+        name: Panel name.
+        name_loc: Location of the panel name.
+    """
+    from matplotlib.offsetbox import AnchoredText
+
+    if plot_cal and plot_sci and sci_runs:
+        _shade_sci_runs(ax, x, sci_runs)
+    if reference is not None:
+        ax.axhline(reference, color="gray", ls=":", lw=0.8, zorder=1)
+
+    markers = (
+        ("CAL", plot_cal, is_cal, "o", 3.2),
+        ("SCI", plot_sci, is_sci, "s", 2.2),
+    )
+    for label, enabled, mask, fmt, size in markers:
+        if not enabled or not np.any(mask):
+            continue
+        ax.errorbar(
+            x[mask],
+            values[mask],
+            yerr=errors[mask] if errorbars else None,
+            fmt=fmt,
+            ms=size,
+            color=colors[label],
+            elinewidth=0.6,
+            zorder=3,
+            label=label,
+        )
+
+    if plot_cal:
+        line = is_cal & np.isfinite(values)
+        if np.any(line):
+            ax.plot(
+                x[line],
+                values[line],
+                ls="--",
+                lw=1.0,
+                alpha=0.8,
+                color=colors["CAL"],
+                zorder=2,
+                label="transfer function",
+            )
+
+    text = AnchoredText(
+        name,
+        loc=name_loc,
+        prop={"size": "small", "weight": "bold"},
+        pad=0.2,
+        frameon=True,
+    )
+    text.patch.set_facecolor("white")
+    text.patch.set_edgecolor("none")
+    text.patch.set_alpha(0.7)
+    ax.add_artist(text)
+
+
+def _legend_center_x(
+    legend: "Legend",
+    grid_center: float,
+    width: float,
+    pad: float,
+) -> float:
+    """Return the legend's horizontal center in figure fraction.
+
+    The legend is centered on the panel grid and shifted only as
+    far as needed to stay inside the figure. A legend wider than
+    the figure is centered on the figure.
+
+    Args:
+        legend: Figure legend.
+        grid_center: Center of the panel grid in figure fraction.
+        width: Figure width in pixels.
+        pad: Minimum distance to the figure edge in pixels.
+
+    Returns:
+        X position of the legend center in figure fraction.
+    """
+    half = (legend.get_window_extent().width / 2.0 + pad) / width
+    if half >= 0.5:
+        return 0.5
+    return min(max(grid_center, half), 1.0 - half)
+
+
+def _fit_margins(
+    fig: "Figure",
+    grid_axes: Sequence["Axes"],
+    used_axes: Sequence["Axes"],
+    legend: "Legend | None",
+    title: "Text | None",
+) -> None:
+    """Fit the flush panel grid between its decorations.
+
+    The title and then the legend are stacked down from the top
+    edge. The grid fills the remaining space so that tick labels,
+    axis labels, legend and title neither overlap the panels nor
+    are clipped. The legend is centered on the panel grid. Margins
+    are sized for the active rcParams and the current figure size.
+
+    Args:
+        fig: Figure to adjust.
+        grid_axes: All axes of the grid, including hidden ones.
+        used_axes: Visible axes whose decorations are measured.
+        legend: Figure legend, or ``None``.
+        title: Figure title, or ``None``.
+
+    Warns:
+        UserWarning: If the figure is too small for its
+            decorations; the default margins are kept.
+    """
+    from matplotlib.transforms import Bbox
+
+    width = fig.bbox.width
+    height = fig.bbox.height
+    pad = _LAYOUT_PAD_IN * fig.dpi
+    legend_x = 0.5
+    # Second pass: resized axes may get different tick labels
+    for _ in range(2):
+        fig.draw_without_rendering()
+        grid = Bbox.union(
+            [
+                ax.get_position().transformed(fig.transFigure)
+                for ax in grid_axes
+            ]
+        )
+        deco = Bbox.union([ax.get_tightbbox() for ax in used_axes])
+
+        y_top = height - pad
+        if title is not None:
+            title.set_y(y_top / height)
+            title.set_verticalalignment("top")
+            y_top -= title.get_window_extent().height + pad
+        legend_y = y_top / height
+        if legend is not None:
+            legend.set_bbox_to_anchor(
+                (legend_x, legend_y), transform=fig.transFigure
+            )
+            y_top -= legend.get_window_extent().height + pad
+
+        left = (max(grid.x0 - deco.x0, 0.0) + pad) / width
+        right = 1.0 - (max(deco.x1 - grid.x1, 0.0) + pad) / width
+        bottom = (max(grid.y0 - deco.y0, 0.0) + pad) / height
+        top = (y_top - max(deco.y1 - grid.y1, 0.0)) / height
+        if left >= right or bottom >= top:
+            warnings.warn(
+                "Figure is too small for its labels and legend; "
+                "decorations may overlap. Increase figsize.",
+                UserWarning,
+                stacklevel=3,
+            )
+            return
+        fig.subplots_adjust(
+            left=left,
+            right=right,
+            bottom=bottom,
+            top=top,
+            wspace=0.0,
+            hspace=0.0,
+        )
+        if legend is not None:
+            legend_x = _legend_center_x(
+                legend, (left + right) / 2.0, width, pad
+            )
+            legend.set_bbox_to_anchor(
+                (legend_x, legend_y), transform=fig.transFigure
+            )
+
+
+def plot_transfer_function(
+    series: BandAveragedSeries,
+    *,
+    select: Sequence[int | str] | None = None,
+    time_mode: str = "elapsed",
+    plot_cal: bool = True,
+    plot_sci: bool = True,
+    errorbars: bool = False,
+    ylim: tuple[float, float] | None = None,
+    reference_value: float | None = None,
+    show_reference: bool = True,
+    colors: dict[str, str] | None = None,
+    name_loc: str | dict[int | str, str] = "upper left",
+    n_cols: int | None = None,
+    figsize: tuple[float, float] | None = None,
+    xlabel: str | None = None,
+    ylabel: str | None = None,
+    title: str | None = None,
+) -> "Figure":
+    """Plot band-averaged CAL/SCI observables per triangle or baseline.
+
+    Each panel shows one triangle or baseline. CAL blocks are drawn
+    as circles, SCI blocks as squares, and the dashed line through
+    the finite CAL points is the transfer function. Contiguous SCI
+    runs are shaded when both block types are plotted.
+
+    Font sizes and tick styles follow the active rcParams. To apply
+    a style, create the figure inside ``matplotlib.rc_context`` and
+    also call ``savefig`` inside that context, because some settings
+    are only read at draw time.
+
+    Panels are flush. Margins for labels, legend and title are
+    sized when the figure is created, from the active rcParams and
+    ``figsize``; resizing the figure afterwards may clip them. In
+    Jupyter, end the call with ``;`` or assign the result to avoid
+    the figure being shown twice.
+
+    Args:
+        series: Result of ``compute_band_averaged_series``.
+        select: ``None`` for all items, or indices and/or names of
+            triangles or baselines, plotted in the given order.
+        time_mode: ``"elapsed"`` (minutes since the first block),
+            ``"ut"`` (UT hours shown as HH:MM), ``"index"`` (block
+            index) or ``"index_ut"`` (block index labelled with
+            HH:MM).
+        plot_cal: Draw CAL points and the transfer function.
+        plot_sci: Draw SCI points.
+        errorbars: Draw error bars from ``series.errors``.
+        ylim: Common y-limits, or ``None`` for auto-scaling.
+        reference_value: Reference line value. ``None`` uses the
+            registry default (0 for phases, 1 otherwise).
+        show_reference: Whether to draw the reference line.
+        colors: Colors keyed by ``"CAL"``/``"SCI"``, merged into the
+            defaults ``tab:blue``/``tab:orange``.
+        name_loc: Location of the panel names, either one matplotlib
+            location string or a mapping from index or name to a
+            location. Unmapped panels use ``"upper left"``.
+        n_cols: Number of grid columns, or ``None`` for automatic.
+        figsize: Figure size in inches, or ``None`` for automatic.
+        xlabel: X-axis label; ``None`` uses the time-mode default.
+        ylabel: Y-axis label; ``None`` uses the observable default.
+        title: Optional figure title.
+
+    Returns:
+        The matplotlib figure.
+
+    Raises:
+        ValueError: If both ``plot_cal`` and ``plot_sci`` are False,
+            if ``select``, ``name_loc`` keys, ``time_mode`` or
+            ``n_cols`` are invalid, or if ``time_mode`` is
+            ``"elapsed"`` or ``"ut"`` and some block times are NaN.
+    """
+    if not (plot_cal or plot_sci):
+        raise ValueError("At least one of plot_cal and plot_sci must be True.")
+    spec = _SPECS[series.observable]
+    indices = _resolve_select(select, series.names)
+    locs = _resolve_name_locs(name_loc, series.names)
+    time_axis = _build_time_axis(series.block_times_sec, time_mode)
+    n_panels = len(indices)
+    n_rows, n_grid_cols = _grid_shape(n_panels, n_cols)
+    if figsize is None:
+        figsize = _default_figsize(n_rows, n_grid_cols)
+    merged_colors = {**_DEFAULT_COLORS, **(colors or {})}
+    reference = None
+    if show_reference:
+        reference = (
+            spec.reference if reference_value is None else reference_value
+        )
+    block_types = np.asarray(series.block_types)
+    is_cal = block_types == "CAL"
+    is_sci = block_types == "SCI"
+    sci_runs = _sci_runs(series.block_types)
+
+    import matplotlib.pyplot as plt
+
+    fig, axes = plt.subplots(
+        n_rows,
+        n_grid_cols,
+        sharex=True,
+        sharey=True,
+        squeeze=False,
+        layout="none",
+        figsize=figsize,
+        gridspec_kw={"wspace": 0.0, "hspace": 0.0},
+    )
+    flat = axes.ravel()
+    used = flat[:n_panels]
+    for ax in flat[n_panels:]:
+        ax.set_visible(False)
+
+    for ax, item in zip(used, indices, strict=True):
+        _draw_panel(
+            ax,
+            time_axis.x,
+            series.values[:, item],
+            series.errors[:, item],
+            is_cal=is_cal,
+            is_sci=is_sci,
+            plot_cal=plot_cal,
+            plot_sci=plot_sci,
+            errorbars=errorbars,
+            colors=merged_colors,
+            sci_runs=sci_runs,
+            reference=reference,
+            name=series.names[item],
+            name_loc=locs[item],
+        )
+        _apply_time_axis(ax, time_axis)
+
+    x_label = time_axis.label if xlabel is None else xlabel
+    y_label = spec.ylabel if ylabel is None else ylabel
+    for row in range(n_rows):
+        axes[row, 0].set_ylabel(y_label)
+        axes[row, -1].tick_params(axis="y", right=False)
+    for col in range(n_grid_cols):
+        axes[0, col].tick_params(axis="x", top=False)
+        if col >= n_panels:
+            continue
+        bottom = axes[(n_panels - 1 - col) // n_grid_cols, col]
+        bottom.set_xlabel(x_label)
+        bottom.tick_params(axis="x", labelbottom=True)
+
+    if ylim is not None:
+        used[0].set_ylim(ylim)
+
+    handles: dict[str, object] = {}
+    for ax in used:
+        pairs = zip(*ax.get_legend_handles_labels(), strict=True)
+        for handle, text in pairs:
+            handles.setdefault(text, handle)
+    order = [text for text in _LEGEND_ORDER if text in handles]
+    legend = None
+    if order:
+        legend = fig.legend(
+            [handles[text] for text in order],
+            order,
+            loc="upper center",
+            ncols=3,
+            framealpha=1,
+            borderaxespad=0.0,
+            handletextpad=0.4,
+            columnspacing=1.0,
+        )
+
+    suptitle = None if title is None else fig.suptitle(title)
+    _fit_margins(fig, list(flat), list(used), legend, suptitle)
+
+    return fig
