@@ -66,7 +66,7 @@ Homepage = "https://github.com/yourusername/ales-nrm"
 Repository = "https://github.com/yourusername/ales-nrm.git"
 Issues = "https://github.com/yourusername/ales-nrm/issues"
 
-[tool.setuptools-scm]
+[tool.setuptools_scm]
 version_file = "src/ales_nrm/_version.py"
 
 [tool.setuptools.packages.find]
