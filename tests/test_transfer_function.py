@@ -25,6 +25,7 @@ from ales_nrm.transfer_function import (
     _build_time_axis,
     _default_figsize,
     _format_hhmm,
+    _format_item_name,
     _grid_shape,
     _legend_center_x,
     _nan_mean_rows,
@@ -494,6 +495,7 @@ class TestComputeSeries:
 
 NAMES = tuple(f"N{k}" for k in range(6))
 DEFAULT_TYPES = ("CAL", "SCI", "SCI", "CAL", "SCI", "CAL")
+TRI_NAMES = ("H1H2H3", "H1H2H4")
 
 
 def _make_series(
@@ -502,6 +504,7 @@ def _make_series(
     observable="t3phi",
     times=None,
     values=None,
+    names=None,
 ):
     """Build a BandAveragedSeries directly for plot tests."""
     n_blocks = len(block_types)
@@ -510,6 +513,8 @@ def _make_series(
         values = values.reshape(n_blocks, n_items)
     values = np.asarray(values, dtype=float)
     n_items = values.shape[1]
+    if names is None:
+        names = tuple(f"N{k}" for k in range(n_items))
     if times is None:
         times = 28800.0 + 600.0 * np.arange(n_blocks)
     return BandAveragedSeries(
@@ -517,7 +522,7 @@ def _make_series(
         label="raw",
         values=values,
         errors=np.full(values.shape, 0.5),
-        names=tuple(f"N{k}" for k in range(n_items)),
+        names=tuple(names),
         block_types=tuple(block_types),
         targets=tuple("cal" if bt == "CAL" else "sci" for bt in block_types),
         block_times_sec=np.asarray(times, dtype=float),
@@ -737,6 +742,37 @@ class TestTimeAxis:
         assert _format_hhmm(seconds) == expected
 
 
+class TestFormatItemName:
+    """Tests for _format_item_name."""
+
+    @pytest.mark.parametrize(
+        ("name", "hyphenate", "expected"),
+        [
+            ("H1H2", True, "H1-H2"),
+            ("H1H2H3", True, "H1-H2-H3"),
+            ("H10H2", True, "H10-H2"),
+            ("S7H2", True, "S7-H2"),
+            ("H1-H2", True, "H1-H2"),
+            ("N3", True, "N3"),
+            ("ABC", True, "ABC"),
+            ("H1H2H3", False, "H1H2H3"),
+        ],
+        ids=[
+            "baseline",
+            "triangle",
+            "multi_digit",
+            "fallback_station",
+            "already_hyphenated",
+            "single_station",
+            "no_digits",
+            "disabled",
+        ],
+    )
+    def test_format(self, name, hyphenate, expected):
+        """Hyphens are inserted where a digit precedes a letter."""
+        assert _format_item_name(name, hyphenate) == expected
+
+
 class TestSciRuns(_MatplotlibAgg):
     """Tests for _sci_runs and _shade_sci_runs."""
 
@@ -803,6 +839,38 @@ class TestPlot(_MatplotlibAgg):
         fig = plot_transfer_function(_make_series(), select=["N3", 1])
         texts = [_anchored(ax)[0].txt.get_text() for ax in fig.axes[:2]]
         assert texts == ["N3", "N1"]
+
+    @pytest.mark.parametrize(
+        ("kwargs", "expected"),
+        [
+            ({}, ["H1-H2-H3", "H1-H2-H4"]),
+            ({"hyphenate_names": True}, ["H1-H2-H3", "H1-H2-H4"]),
+            ({"hyphenate_names": False}, list(TRI_NAMES)),
+        ],
+        ids=["default", "enabled", "disabled"],
+    )
+    def test_hyphenate_names(self, kwargs, expected):
+        """Panel names are hyphenated by default."""
+        series = _make_series(n_items=2, names=TRI_NAMES)
+        fig = plot_transfer_function(series, **kwargs)
+        texts = [_anchored(ax)[0].txt.get_text() for ax in fig.axes]
+        assert texts == expected
+        assert series.names == TRI_NAMES
+
+    def test_select_and_name_loc_use_stored_names(self):
+        """Select and name_loc refer to the stored names."""
+        series = _make_series(n_items=2, names=TRI_NAMES)
+        fig = plot_transfer_function(
+            series,
+            select=["H1H2H4"],
+            name_loc={"H1H2H4": "lower right"},
+        )
+        assert _anchored(fig.axes[0])[0].txt.get_text() == "H1-H2-H4"
+        assert _name_corners(fig, fig.axes[:1]) == ["lower right"]
+        plt.close("all")
+        with pytest.raises(ValueError, match="Unknown name"):
+            plot_transfer_function(series, select=["H1-H2-H4"])
+        assert plt.get_fignums() == []
 
     @pytest.mark.parametrize(
         ("plot_cal", "plot_sci", "expected"),
@@ -1109,7 +1177,8 @@ class TestPlot(_MatplotlibAgg):
         assert len(fig.axes) == N_BL
         assert fig.axes[0].get_ylabel() == "squared visibility"
         texts = [_anchored(ax)[0].txt.get_text() for ax in fig.axes]
-        assert texts == ["H1H2", "H1H3", "H1H4"]
+        # Hyphens added to baseline names owing to hyphenate_names=True.
+        assert texts == ["H1-H2", "H1-H3", "H1-H4"]
         assert _legend_labels(fig) == ["CAL", "transfer function", "SCI"]
 
     def test_panels_flush(self):

@@ -7,6 +7,7 @@ band-averaged values per triangle or baseline over time. The dashed
 line through the calibrator blocks is the transfer function.
 """
 
+import re
 import warnings
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
@@ -397,6 +398,7 @@ _DEFAULT_NAME_LOC = "upper left"
 _SCI_SHADES = ("#f0f0f0", "#e4e4e4")
 _LEGEND_ORDER = ("CAL", "transfer function", "SCI")
 _LAYOUT_PAD_IN = 0.05
+_STATION_BOUNDARY = re.compile(r"(?<=\d)(?=[A-Za-z])")
 
 
 class _TimeAxis(NamedTuple):
@@ -416,6 +418,23 @@ class _TimeAxis(NamedTuple):
     formatter: "Formatter | None" = None
     locator: "Locator | None" = None
     ticklabels: tuple[str, ...] | None = None
+
+
+def _format_item_name(name: str, hyphenate: bool) -> str:
+    """Return the display name of a triangle or baseline.
+
+    Args:
+        name: Stored item name, e.g. ``"H1H2H3"``.
+        hyphenate: If True, insert a hyphen wherever a digit is
+            followed by a letter, e.g. ``"H1-H2-H3"``. Names
+            without such a boundary are returned unchanged.
+
+    Returns:
+        The name to display in the panel.
+    """
+    if not hyphenate:
+        return name
+    return _STATION_BOUNDARY.sub("-", name)
 
 
 def _resolve_item(entry: object, names: Sequence[str]) -> int:
@@ -871,6 +890,7 @@ def plot_transfer_function(
     show_reference: bool = True,
     colors: dict[str, str] | None = None,
     name_loc: str | dict[int | str, str] = "upper left",
+    hyphenate_names: bool = True,
     n_cols: int | None = None,
     figsize: tuple[float, float] | None = None,
     xlabel: str | None = None,
@@ -915,6 +935,12 @@ def plot_transfer_function(
         name_loc: Location of the panel names, either one matplotlib
             location string or a mapping from index or name to a
             location. Unmapped panels use ``"upper left"``.
+        hyphenate_names: Insert a hyphen between the station names
+            in the panel names, e.g. ``H1H2H3`` is shown as
+            ``H1-H2-H3``. A station boundary is assumed wherever a
+            digit is followed by a letter; other names are shown
+            unchanged. ``select`` and ``name_loc`` always refer to
+            the stored names.
         n_cols: Number of grid columns, or ``None`` for automatic.
         figsize: Figure size in inches, or ``None`` for automatic.
         xlabel: X-axis label; ``None`` uses the time-mode default.
@@ -982,7 +1008,7 @@ def plot_transfer_function(
             colors=merged_colors,
             sci_runs=sci_runs,
             reference=reference,
-            name=series.names[item],
+            name=_format_item_name(series.names[item], hyphenate_names),
             name_loc=locs[item],
         )
         _apply_time_axis(ax, time_axis)
