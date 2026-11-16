@@ -54,7 +54,7 @@ def _make_obs(wavelengths, **arrays):
     triangles = [
         TriangleInfo(
             sta_index=(1, 2, k + 3),
-            name=f"H1-H2-H{k + 3}",
+            name=f"H1H2H{k + 3}",
             u1=0.0,
             v1=0.0,
             u2=0.0,
@@ -263,7 +263,7 @@ class TestComputeSeries:
         block = make_block(observables={"raw": obs})
         tri = compute_band_averaged_series([block], observable="t3phi")
         bl = compute_band_averaged_series([block], observable="vis2")
-        assert tri.names == ("H1-H2-H3", "H1-H2-H4")
+        assert tri.names == ("H1H2H3", "H1H2H4")
         assert bl.names == ("H1H2", "H1H3", "H1H4")
 
     def test_flags_masked_by_default(self, make_block):

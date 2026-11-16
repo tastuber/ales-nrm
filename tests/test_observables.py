@@ -64,7 +64,7 @@ def sample_triangles():
     return [
         TriangleInfo(
             sta_index=(1, 2, 3),
-            name="H1-H2-H3",
+            name="H1H2H3",
             u1=1.0,
             v1=-1.0,
             u2=-2.0,
@@ -72,7 +72,7 @@ def sample_triangles():
         ),
         TriangleInfo(
             sta_index=(1, 2, 4),
-            name="H1-H2-H4",
+            name="H1H2H4",
             u1=1.0,
             v1=-1.0,
             u2=-1.0,
@@ -80,7 +80,7 @@ def sample_triangles():
         ),
         TriangleInfo(
             sta_index=(1, 3, 4),
-            name="H1-H3-H4",
+            name="H1H3H4",
             u1=-1.0,
             v1=-1.0,
             u2=1.0,
@@ -88,7 +88,7 @@ def sample_triangles():
         ),
         TriangleInfo(
             sta_index=(2, 3, 4),
-            name="H2-H3-H4",
+            name="H2H3H4",
             u1=-2.0,
             v1=0.0,
             u2=1.0,
@@ -213,14 +213,14 @@ class TestTriangleInfo:
         """TriangleInfo stores attributes correctly."""
         tri = TriangleInfo(
             sta_index=(1, 2, 3),
-            name="H1-H2-H3",
+            name="H1H2H3",
             u1=1.0,
             v1=0.5,
             u2=-0.5,
             v2=1.0,
         )
         assert tri.sta_index == (1, 2, 3)
-        assert tri.name == "H1-H2-H3"
+        assert tri.name == "H1H2H3"
         assert tri.u1 == 1.0
         assert tri.v1 == 0.5
         assert tri.u2 == -0.5
@@ -230,7 +230,7 @@ class TestTriangleInfo:
         """TriangleInfo is immutable."""
         tri = TriangleInfo(
             sta_index=(1, 2, 3),
-            name="H1-H2-H3",
+            name="H1H2H3",
             u1=1.0,
             v1=0.5,
             u2=-0.5,

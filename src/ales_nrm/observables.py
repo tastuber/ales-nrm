@@ -49,7 +49,7 @@ class BaselineInfo:
 
     Attributes:
         sta_index: (sta1, sta2) 1-based station indices.
-        name: Baseline label, e.g. "H1-H2".
+        name: Baseline label, e.g. "H1H2".
         u: u-coordinate in meters, parallactic-angle-rotated.
         v: v-coordinate in meters, parallactic-angle-rotated.
     """
@@ -68,7 +68,7 @@ class TriangleInfo:
 
     Attributes:
         sta_index: (A, B, C) 1-based station indices.
-        name: Triangle label, e.g. "H1-H2-H3".
+        name: Triangle label, e.g. "H1H2H3".
         u1: u-coordinate of baseline AB in meters.
         v1: v-coordinate of baseline AB in meters.
         u2: u-coordinate of baseline BC in meters.
@@ -464,7 +464,7 @@ class Observables:
             triangles.append(
                 TriangleInfo(
                     sta_index=(sta_i, sta_j, sta_k),
-                    name=f"{bl_ij.hole1}-{bl_ij.hole2}-{bl_jk.hole2}",
+                    name=f"{bl_ij.hole1}{bl_ij.hole2}{bl_jk.hole2}",
                     u1=u_ij,
                     v1=v_ij,
                     u2=u_jk,

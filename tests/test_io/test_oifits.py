@@ -51,7 +51,7 @@ def geometry():
     triangles = [
         TriangleInfo(
             sta_index=(1, 2, 3),
-            name="H1-H2-H3",
+            name="H1H2H3",
             u1=2.0,
             v1=0.0,
             u2=-1.0,
