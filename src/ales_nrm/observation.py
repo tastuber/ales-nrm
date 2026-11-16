@@ -21,6 +21,8 @@ from astropy.io import fits
 from ales_nrm.io.read_fits import read_cubes
 
 if TYPE_CHECKING:
+    from matplotlib.figure import Figure
+
     from ales_nrm.nrm.mask import NRMMask
     from ales_nrm.observables import Observables
 
@@ -1638,6 +1640,59 @@ class ObservingSequence:
             )
 
         return paths
+
+    def plot_transfer_function(
+        self,
+        *,
+        observable: str = "t3phi",
+        label: str = "raw",
+        wl_min: float | None = None,
+        wl_max: float | None = None,
+        use_flags: bool = True,
+        **plot_kwargs: Any,
+    ) -> "Figure":
+        """Plot the band-averaged transfer function of this sequence.
+
+        Thin wrapper around
+        ``transfer_function.compute_band_averaged_series`` and
+        ``transfer_function.plot_transfer_function``. The blocks of
+        this sequence are used in their stored (chronological) order.
+
+        Args:
+            observable: Registry key: ``"t3phi"``, ``"t3amp"``,
+                ``"vis2"``, ``"visamp"`` or ``"visphi"``.
+            label: Key in ``block.observables``. Default ``"raw"``.
+            wl_min: Lower wavelength bound in µm (inclusive).
+                ``None`` means no lower bound.
+            wl_max: Upper wavelength bound in µm (inclusive).
+                ``None`` means no upper bound.
+            use_flags: If True (default), flagged samples are
+                excluded from the band averages.
+            **plot_kwargs: Keyword arguments forwarded to
+                ``transfer_function.plot_transfer_function``.
+
+        Returns:
+            The matplotlib figure.
+
+        Raises:
+            ValueError: Propagated from the compute or plot
+                function, e.g. for an unknown observable, no usable
+                data or invalid plot options.
+        """
+        from ales_nrm.transfer_function import (
+            compute_band_averaged_series,
+            plot_transfer_function,
+        )
+
+        series = compute_band_averaged_series(
+            self,
+            observable=observable,
+            label=label,
+            wl_min=wl_min,
+            wl_max=wl_max,
+            use_flags=use_flags,
+        )
+        return plot_transfer_function(series, **plot_kwargs)
 
     def _filter_blocks(
         self,

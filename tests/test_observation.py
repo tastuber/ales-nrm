@@ -2974,3 +2974,85 @@ class TestObservingSequenceSaveAllOifits:
             )
 
         assert len(paths) == 0
+
+
+class TestPlotTransferFunction:
+    """Tests for ObservingSequence.plot_transfer_function."""
+
+    COMPUTE = "ales_nrm.transfer_function.compute_band_averaged_series"
+    PLOT = "ales_nrm.transfer_function.plot_transfer_function"
+
+    def test_default_compute_arguments(self):
+        """Defaults are forwarded to the compute function."""
+        seq = ObservingSequence(name="test")
+        with (
+            patch(self.COMPUTE) as mock_compute,
+            patch(self.PLOT),
+        ):
+            seq.plot_transfer_function()
+
+        mock_compute.assert_called_once_with(
+            seq,
+            observable="t3phi",
+            label="raw",
+            wl_min=None,
+            wl_max=None,
+            use_flags=True,
+        )
+
+    def test_custom_compute_arguments(self):
+        """Compute arguments are forwarded unchanged."""
+        seq = ObservingSequence(name="test")
+        with (
+            patch(self.COMPUTE) as mock_compute,
+            patch(self.PLOT),
+        ):
+            seq.plot_transfer_function(
+                observable="vis2",
+                label="calibrated",
+                wl_min=3.5,
+                wl_max=4.0,
+                use_flags=False,
+            )
+
+        mock_compute.assert_called_once_with(
+            seq,
+            observable="vis2",
+            label="calibrated",
+            wl_min=3.5,
+            wl_max=4.0,
+            use_flags=False,
+        )
+
+    def test_plot_kwargs_forwarded_and_figure_returned(self):
+        """Plot kwargs reach the plot function; its figure returns."""
+        seq = ObservingSequence(name="test")
+        with (
+            patch(self.COMPUTE) as mock_compute,
+            patch(self.PLOT) as mock_plot,
+        ):
+            fig = seq.plot_transfer_function(
+                time_mode="index",
+                ylim=(-1.0, 1.0),
+                title="T",
+            )
+
+        mock_plot.assert_called_once_with(
+            mock_compute.return_value,
+            time_mode="index",
+            ylim=(-1.0, 1.0),
+            title="T",
+        )
+        assert fig is mock_plot.return_value
+
+    def test_compute_error_propagates(self):
+        """Errors from the compute function are not swallowed."""
+        seq = ObservingSequence(name="test")
+        with (
+            patch(self.COMPUTE, side_effect=ValueError("no data")),
+            patch(self.PLOT) as mock_plot,
+            pytest.raises(ValueError, match="no data"),
+        ):
+            seq.plot_transfer_function()
+
+        mock_plot.assert_not_called()
