@@ -191,8 +191,9 @@ class ObservingBlock:
             per frame (or per stacked cube after stacking).
             Extracted from the ``TIME-OBS`` FITS header keyword.
             ``None`` before ``load()`` is called. After stacking,
-            contains the first timestamp of each stacking group
-            as a representative identifier.
+            contains the mean timestamp of each stacking group.
+            Empty and malformed entries are excluded from the mean;
+            a group without valid entries gets an empty string.
     """
 
     block_type: BlockType
@@ -569,7 +570,8 @@ class ObservingBlock:
 
         Combines multiple frames into fewer stacked cubes. The stacked
         data replaces the original data in ``cubes``, ``file_numbers``,
-        and ``headers``. The attribute ``stacking_groups`` records which
+        ``headers``, ``parallactic_angles``, ``altitudes``, and
+        ``timestamps``. The attribute ``stacking_groups`` records which
         file numbers were combined into each resulting cube.
 
         Frames can be grouped either by specifying a fixed
@@ -606,7 +608,6 @@ class ObservingBlock:
             ValueError: If arguments are invalid, if ``method`` is not
                 recognized, or if file numbers in ``groups`` are not
                 found in the loaded data.
-            NotImplementedError: If ``center=True``.
         """
         if not self.is_loaded:
             raise RuntimeError(
@@ -909,11 +910,11 @@ class ObservingBlock:
         Dispatches to the appropriate extraction backend, populates an
         ``Observables`` instance, and stores it in
         ``self.observables[label]``. The raw backend result is stored in
-        ``self._raw_extraction[label][result]`` while the backend is
-        identified via ``self._raw_extraction[label][backend]``.
+        ``self._raw_extraction[label]["result"]``, and the backend name
+        in ``self._raw_extraction[label]["backend"]``.
 
         Multiple extractions can coexist under different labels
-        (e.g., ``'raw'``, ``'calibrated'``, ``calibrated_method1).
+        (e.g., ``'raw'``, ``'calibrated'``, ``'calibrated_method1'``).
 
         Args:
             mask: NRMMask instance providing hole geometry for
@@ -1360,15 +1361,20 @@ class ObservingSequence:
 
     def get_blocks_by_type(
         self,
-        block_type: BlockType,
+        block_type: BlockType | str,
     ) -> list[ObservingBlock]:
         """Return all blocks matching a given type.
 
         Args:
-            block_type: BlockType to filter by.
+            block_type: BlockType, or its string value (``'SCI'`` or
+                ``'CAL'``), to filter by.
 
         Returns:
             List of matching blocks in sequence order.
+
+        Raises:
+            ValueError: If ``block_type`` is a string that is not a
+                valid BlockType value.
         """
         if not isinstance(block_type, BlockType):
             block_type = BlockType(block_type)
