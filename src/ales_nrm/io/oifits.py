@@ -233,7 +233,7 @@ def generate_oifits_filename(
 ) -> str:
     """Generate a standardized OIFITS filename.
 
-    Format: {date}T{time}_{target}_{state}[_{label}].oifits
+    Format: {date}T{time}_{target}_{state}[_{label}].fits
 
     Args:
         obs: Observables providing metadata.
