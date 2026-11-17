@@ -2562,7 +2562,7 @@ class TestObservingBlockSaveOifits:
         mock_obs.time_start = "08:00:00.000"
         sci_block.observables["raw"] = mock_obs
 
-        expected_path = tmp_path / "test.oifits"
+        expected_path = tmp_path / "test.fits"
         with (
             patch(
                 "ales_nrm.io.oifits.write_oifits",
@@ -2570,7 +2570,7 @@ class TestObservingBlockSaveOifits:
             ) as mock_write,
             patch(
                 "ales_nrm.io.oifits.generate_oifits_filename",
-                return_value="test.oifits",
+                return_value="test.fits",
             ),
         ):
             paths = sci_block.save_oifits(tmp_path, label="raw")
@@ -2590,11 +2590,11 @@ class TestObservingBlockSaveOifits:
         with (
             patch(
                 "ales_nrm.io.oifits.write_oifits",
-                return_value=tmp_path / "out.oifits",
+                return_value=tmp_path / "out.fits",
             ),
             patch(
                 "ales_nrm.io.oifits.generate_oifits_filename",
-                return_value="out.oifits",
+                return_value="out.fits",
             ),
         ):
             paths = sci_block.save_oifits(tmp_path)
@@ -2618,14 +2618,14 @@ class TestObservingBlockSaveOifits:
         sci_block.observables["cal"] = MagicMock()
 
         with pytest.raises(ValueError, match="Cannot specify filename"):
-            sci_block.save_oifits(tmp_path, filename="explicit.oifits")
+            sci_block.save_oifits(tmp_path, filename="explicit.fits")
 
     def test_explicit_filename_used(self, sci_block, tmp_path):
         """Explicit filename is passed to write_oifits."""
         sci_block.load()
         sci_block.observables["raw"] = MagicMock()
 
-        expected_path = tmp_path / "custom.oifits"
+        expected_path = tmp_path / "custom.fits"
         with patch(
             "ales_nrm.io.oifits.write_oifits",
             return_value=expected_path,
@@ -2633,11 +2633,11 @@ class TestObservingBlockSaveOifits:
             paths = sci_block.save_oifits(
                 tmp_path,
                 label="raw",
-                filename="custom.oifits",
+                filename="custom.fits",
             )
 
         call_kwargs = mock_write.call_args[1]
-        assert call_kwargs["filename"] == "custom.oifits"
+        assert call_kwargs["filename"] == "custom.fits"
         assert paths[0] == expected_path
 
     def test_overwrite_forwarded(self, sci_block, tmp_path):
@@ -2648,11 +2648,11 @@ class TestObservingBlockSaveOifits:
         with (
             patch(
                 "ales_nrm.io.oifits.write_oifits",
-                return_value=tmp_path / "out.oifits",
+                return_value=tmp_path / "out.fits",
             ) as mock_write,
             patch(
                 "ales_nrm.io.oifits.generate_oifits_filename",
-                return_value="out.oifits",
+                return_value="out.fits",
             ),
         ):
             sci_block.save_oifits(tmp_path, label="raw", overwrite=True)
@@ -2676,11 +2676,11 @@ class TestObservingSequenceSaveAllOifits:
         with (
             patch(
                 "ales_nrm.io.oifits.write_oifits",
-                return_value=tmp_path / "out.oifits",
+                return_value=tmp_path / "out.fits",
             ),
             patch(
                 "ales_nrm.io.oifits.generate_oifits_filename",
-                return_value="out.oifits",
+                return_value="out.fits",
             ),
         ):
             paths = seq.save_all_oifits(tmp_path, label="raw")
@@ -2698,7 +2698,7 @@ class TestObservingSequenceSaveAllOifits:
 
         seq = ObservingSequence(blocks=[sci_block, cal_block], name="test")
 
-        expected_path = tmp_path / "combined.oifits"
+        expected_path = tmp_path / "combined.fits"
         with patch(
             "ales_nrm.io.oifits.write_oifits",
             return_value=expected_path,
@@ -2723,11 +2723,11 @@ class TestObservingSequenceSaveAllOifits:
         with (
             patch(
                 "ales_nrm.io.oifits.write_oifits",
-                return_value=tmp_path / "out.oifits",
+                return_value=tmp_path / "out.fits",
             ),
             patch(
                 "ales_nrm.io.oifits.generate_oifits_filename",
-                return_value="out.oifits",
+                return_value="out.fits",
             ),
         ):
             paths = seq.save_all_oifits(
@@ -2750,11 +2750,11 @@ class TestObservingSequenceSaveAllOifits:
         with (
             patch(
                 "ales_nrm.io.oifits.write_oifits",
-                return_value=tmp_path / "out.oifits",
+                return_value=tmp_path / "out.fits",
             ),
             patch(
                 "ales_nrm.io.oifits.generate_oifits_filename",
-                return_value="out.oifits",
+                return_value="out.fits",
             ),
         ):
             paths = seq.save_all_oifits(
@@ -2777,11 +2777,11 @@ class TestObservingSequenceSaveAllOifits:
         with (
             patch(
                 "ales_nrm.io.oifits.write_oifits",
-                return_value=tmp_path / "out.oifits",
+                return_value=tmp_path / "out.fits",
             ),
             patch(
                 "ales_nrm.io.oifits.generate_oifits_filename",
-                return_value="out.oifits",
+                return_value="out.fits",
             ),
         ):
             paths = seq.save_all_oifits(
@@ -2806,11 +2806,11 @@ class TestObservingSequenceSaveAllOifits:
         with (
             patch(
                 "ales_nrm.io.oifits.write_oifits",
-                return_value=tmp_path / "out.oifits",
+                return_value=tmp_path / "out.fits",
             ),
             patch(
                 "ales_nrm.io.oifits.generate_oifits_filename",
-                return_value="out.oifits",
+                return_value="out.fits",
             ),
         ):
             with pytest.warns(UserWarning, match="does not have label"):
@@ -2825,7 +2825,7 @@ class TestObservingSequenceSaveAllOifits:
 
         seq = ObservingSequence(blocks=[sci_block], name="test")
 
-        expected = tmp_path / "out.oifits"
+        expected = tmp_path / "out.fits"
         with (
             patch(
                 "ales_nrm.io.oifits.write_oifits",
@@ -2833,7 +2833,7 @@ class TestObservingSequenceSaveAllOifits:
             ),
             patch(
                 "ales_nrm.io.oifits.generate_oifits_filename",
-                return_value="out.oifits",
+                return_value="out.fits",
             ),
         ):
             paths = seq.save_all_oifits(tmp_path, label="raw")
@@ -2853,7 +2853,7 @@ class TestObservingSequenceSaveAllOifits:
 
         with patch(
             "ales_nrm.io.oifits.write_oifits",
-            return_value=tmp_path / "out.oifits",
+            return_value=tmp_path / "out.fits",
         ):
             with pytest.warns(UserWarning, match="does not have label"):
                 paths = seq.save_all_oifits(
@@ -2873,11 +2873,11 @@ class TestObservingSequenceSaveAllOifits:
         with (
             patch(
                 "ales_nrm.io.oifits.write_oifits",
-                return_value=tmp_path / "out.oifits",
+                return_value=tmp_path / "out.fits",
             ),
             patch(
                 "ales_nrm.io.oifits.generate_oifits_filename",
-                return_value="out.oifits",
+                return_value="out.fits",
             ),
         ):
             paths = seq.save_all_oifits(tmp_path)
@@ -2899,7 +2899,7 @@ class TestObservingSequenceSaveAllOifits:
 
         with patch(
             "ales_nrm.io.oifits.write_oifits",
-            return_value=tmp_path / "out.oifits",
+            return_value=tmp_path / "out.fits",
         ):
             paths = seq.save_all_oifits(tmp_path, combine=True)
 
@@ -2920,7 +2920,7 @@ class TestObservingSequenceSaveAllOifits:
             seq.save_all_oifits(
                 tmp_path,
                 combine=True,
-                filename="out.oifits",
+                filename="out.fits",
             )
 
     def test_save_all_skips_empty_observables_silently(
@@ -2939,11 +2939,11 @@ class TestObservingSequenceSaveAllOifits:
         with (
             patch(
                 "ales_nrm.io.oifits.write_oifits",
-                return_value=tmp_path / "out.oifits",
+                return_value=tmp_path / "out.fits",
             ),
             patch(
                 "ales_nrm.io.oifits.generate_oifits_filename",
-                return_value="out.oifits",
+                return_value="out.fits",
             ),
         ):
             # No warning expected — empty observables is not a
