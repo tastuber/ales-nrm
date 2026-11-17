@@ -52,6 +52,34 @@ _OBS_ATTR_MAP = {
 }
 
 
+def _resolve_calibrate_set(calibrate: set[str] | None) -> set[str]:
+    """Resolve and validate a set of observable keys to calibrate.
+
+    Args:
+        calibrate: Observable keys to calibrate, or ``None`` for all
+            keys in ``_VALID_OBSERVABLES``.
+
+    Returns:
+        A new set of validated observable keys.
+
+    Raises:
+        ValueError: If ``calibrate`` is empty or contains keys not in
+            ``_VALID_OBSERVABLES``.
+    """
+    if calibrate is None:
+        return set(_VALID_OBSERVABLES)
+    calibrate_set = set(calibrate)
+    if not calibrate_set:
+        raise ValueError("calibrate set must not be empty.")
+    invalid = calibrate_set - _VALID_OBSERVABLES
+    if invalid:
+        raise ValueError(
+            f"Invalid observable keys: {sorted(invalid)}. "
+            f"Valid keys: {sorted(_VALID_OBSERVABLES)}."
+        )
+    return calibrate_set
+
+
 def _calibrate_subtraction(
     sci_value: np.ndarray,
     sci_err: np.ndarray,
@@ -390,18 +418,7 @@ def calibrate_block(
             is missing.
     """
     # 1. Resolve calibrate set
-    if calibrate is None:
-        calibrate_set = set(_VALID_OBSERVABLES)
-    else:
-        calibrate_set = set(calibrate)
-        if not calibrate_set:
-            raise ValueError("calibrate set must not be empty.")
-        invalid = calibrate_set - _VALID_OBSERVABLES
-        if invalid:
-            raise ValueError(
-                f"Invalid observable keys: {sorted(invalid)}. "
-                f"Valid keys: {sorted(_VALID_OBSERVABLES)}."
-            )
+    calibrate_set = _resolve_calibrate_set(calibrate)
 
     # 2. Validate method
     if method not in ("constant", "linear"):
@@ -595,18 +612,7 @@ def compute_scatter_uncertainties(
             required observable is missing on a scatter block.
     """
     # Resolve calibrate set
-    if calibrate is None:
-        calibrate_set = set(_VALID_OBSERVABLES)
-    else:
-        calibrate_set = set(calibrate)
-        if not calibrate_set:
-            raise ValueError("calibrate set must not be empty.")
-        invalid = calibrate_set - _VALID_OBSERVABLES
-        if invalid:
-            raise ValueError(
-                f"Invalid observable keys: {sorted(invalid)}. "
-                f"Valid keys: {sorted(_VALID_OBSERVABLES)}."
-            )
+    calibrate_set = _resolve_calibrate_set(calibrate)
 
     if len(scatter_blocks) < 2:
         raise ValueError(

@@ -6,10 +6,12 @@ import numpy as np
 import pytest
 
 from ales_nrm.calibrate import (
+    _VALID_OBSERVABLES,
     _calibrate_division,
     _calibrate_subtraction,
     _get_calibration_values_constant,
     _get_calibration_values_linear,
+    _resolve_calibrate_set,
     calibrate_block,
     compute_scatter_uncertainties,
 )
@@ -422,6 +424,34 @@ class TestGetCalibrationValuesLinear:
             )
         # Falls back to constant weighted mean (equal weights)
         np.testing.assert_allclose(result_val, [[5.0]])
+
+
+class TestResolveCalibrateSet:
+    """Tests for _resolve_calibrate_set."""
+
+    def test_none_returns_all(self):
+        """None resolves to a new set of all valid keys."""
+        result = _resolve_calibrate_set(None)
+        assert result == _VALID_OBSERVABLES
+        assert isinstance(result, set)
+        assert result is not _VALID_OBSERVABLES
+
+    def test_subset_returns_new_set(self):
+        """A valid subset is returned as an equal, new set."""
+        requested = {"vis2", "t3phi"}
+        result = _resolve_calibrate_set(requested)
+        assert result == requested
+        assert result is not requested
+
+    @pytest.mark.parametrize(
+        ("calibrate", "match"),
+        [(set(), "must not be empty"), ({"bogus"}, "Invalid observable")],
+        ids=["empty", "unknown_key"],
+    )
+    def test_invalid_raises(self, calibrate, match):
+        """Empty or unknown keys raise ValueError."""
+        with pytest.raises(ValueError, match=match):
+            _resolve_calibrate_set(calibrate)
 
 
 def _make_observables(

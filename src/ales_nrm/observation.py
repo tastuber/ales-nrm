@@ -1088,20 +1088,9 @@ class ObservingBlock:
             calibrator_blocks = [calibrator_blocks]
 
         # Resolve calibrate set
-        _valid_observables = frozenset({"t3phi", "vis2", "visphi", "visamp"})
-        if calibrate is None:
-            calibrate_set = set(_valid_observables)
-        else:
-            calibrate_set = set(calibrate)
-            if not calibrate_set:
-                raise ValueError("calibrate set must not be empty.")
-            invalid = calibrate_set - _valid_observables
-            if invalid:
-                raise ValueError(
-                    f"Invalid observable keys: "
-                    f"{sorted(invalid)}. Valid keys: "
-                    f"{sorted(_valid_observables)}."
-                )
+        from ales_nrm.calibrate import _resolve_calibrate_set
+
+        calibrate_set = _resolve_calibrate_set(calibrate)
 
         if backend == "sampy":
             from ales_nrm.sampy_interface.calibrate import (
