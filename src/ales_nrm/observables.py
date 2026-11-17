@@ -22,9 +22,9 @@ class Station:
     Attributes:
         index: 1-based station index.
         name: Station label, e.g. "H1".
-        x: Pupil-plane x-coordinate in meters (unrotated py parallactic
+        x: Pupil-plane x-coordinate in meters (unrotated by parallactic
             angle).
-        y: Pupil-plane y-coordinate in meters (unrotated py parallactic
+        y: Pupil-plane y-coordinate in meters (unrotated by parallactic
             angle).
         z: Height coordinate in meters (0 for aperture masks).
         diameter: Element diameter in meters.
