@@ -97,10 +97,10 @@ class Observables:
         baselines: Ordered list of BaselineInfo objects.
         triangles: Ordered list of TriangleInfo objects.
         mean_para_angle: Mean parallactic angle in degrees used for u,v.
-        mjd: Mean MJD of the observing sequence (None if date
+        mjd: Mean MJD of the observing block (None if date
             unavailable).
-        time_start: First UT timestamp string of the sequence.
-        time_end: Last UT timestamp string of the sequence.
+        time_start: First UT timestamp string of the block.
+        time_end: Last UT timestamp string of the block.
         vis2: Squared visibilities, shape ``(n_baselines, n_wav)``.
         vis2_err: Uncertainties on vis2.
         vis2_flag: Boolean flags for vis2.
