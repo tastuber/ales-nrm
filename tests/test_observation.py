@@ -2975,6 +2975,21 @@ class TestObservingSequenceSaveAllOifits:
 
         assert len(paths) == 0
 
+    def test_filename_without_combine_raises(self, sci_block, tmp_path):
+        """Filename with combine=False raises before writing."""
+        sci_block.load()
+        sci_block.observables["raw"] = MagicMock()
+
+        seq = ObservingSequence(blocks=[sci_block], name="test")
+
+        with (
+            patch("ales_nrm.io.oifits.write_oifits") as mock_write,
+            pytest.raises(ValueError, match="only valid with combine=True"),
+        ):
+            seq.save_all_oifits(tmp_path, filename="out.fits")
+
+        mock_write.assert_not_called()
+
 
 class TestPlotTransferFunction:
     """Tests for ObservingSequence.plot_transfer_function."""

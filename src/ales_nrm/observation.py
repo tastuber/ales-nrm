@@ -1537,14 +1537,22 @@ class ObservingSequence:
                 (per label) into a single multi-block OIFITS
                 file. If False (default), write one file per
                 block per label.
-            filename: Explicit filename (only valid when
-                combine=True with a single label). If None,
+            filename: Explicit filename. Only valid with
+                ``combine=True`` and a single label. If None,
                 auto-generated.
             overwrite: Overwrite existing files.
 
         Returns:
             List of Paths to written files.
+
+        Raises:
+            ValueError: If ``filename`` is given with
+                ``combine=False``, or with ``combine=True``
+                and more than one label.
         """
+        if filename is not None and not combine:
+            raise ValueError("filename is only valid with combine=True.")
+
         from ales_nrm.io.oifits import write_oifits
 
         output_dir = Path(output_dir)
