@@ -14,6 +14,21 @@ def rng():
 
 
 @pytest.fixture()
+def agg_backend():
+    """Select the Agg backend and close all figures.
+
+    Figures are closed before and after the test.
+    """
+    import matplotlib
+    import matplotlib.pyplot as plt
+
+    matplotlib.use("Agg")
+    plt.close("all")
+    yield
+    plt.close("all")
+
+
+@pytest.fixture()
 def sample_wavelengths():
     """Provide a realistic ALES wavelength array."""
     return np.linspace(2.768, 4.290, 98)

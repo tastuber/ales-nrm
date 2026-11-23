@@ -582,17 +582,6 @@ def _span_x(patch):
     return float(verts[:, 0].min()), float(verts[:, 0].max())
 
 
-class _MatplotlibAgg:
-    """Mixin selecting the Agg backend and closing all figures."""
-
-    @pytest.fixture(autouse=True)
-    def _agg_backend(self):
-        """Use the Agg backend and close all figures afterwards."""
-        matplotlib.use("Agg")
-        yield
-        plt.close("all")
-
-
 class TestResolveSelect:
     """Tests for _resolve_select."""
 
@@ -773,7 +762,8 @@ class TestFormatItemName:
         assert _format_item_name(name, hyphenate) == expected
 
 
-class TestSciRuns(_MatplotlibAgg):
+@pytest.mark.usefixtures("agg_backend")
+class TestSciRuns:
     """Tests for _sci_runs and _shade_sci_runs."""
 
     @pytest.mark.parametrize(
@@ -820,7 +810,8 @@ class TestSciRuns(_MatplotlibAgg):
         assert _span_x(ax.patches[0]) == pytest.approx((4.5, 5.5))
 
 
-class TestPlot(_MatplotlibAgg):
+@pytest.mark.usefixtures("agg_backend")
+class TestPlot:
     """Tests for plot_transfer_function."""
 
     @pytest.mark.parametrize(

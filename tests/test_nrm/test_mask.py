@@ -781,15 +781,9 @@ class TestSplodgePositionsConsistency:
             assert local_val > np.median(ps)
 
 
+@pytest.mark.usefixtures("agg_backend")
 class TestPlotMethods:
     """Tests that plot methods run without error."""
-
-    @pytest.fixture(autouse=True)
-    def _setup_matplotlib(self):
-        """Use non-interactive backend."""
-        import matplotlib
-
-        matplotlib.use("Agg")
 
     def test_plot_pupil(self, bundled_mask):
         """plot_pupil runs without error."""
