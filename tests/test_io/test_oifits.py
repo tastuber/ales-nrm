@@ -626,10 +626,9 @@ class TestWriteOifitsMultiBlock:
             )
             assert count == 1
 
-    def test_different_wavelength_grids(
-        self, full_observables, rng, output_dir
-    ):
-        """Different wavelength grids produce multiple tables."""
+    @pytest.fixture()
+    def two_grid_observables(self, full_observables, rng):
+        """Two Observables on a 2- and a 3-channel grid."""
         obs_a = copy.deepcopy(full_observables)
         obs_a.target = "A"
 
@@ -654,8 +653,13 @@ class TestWriteOifitsMultiBlock:
         obs_b.t3amp = rng.uniform(0.8, 1.0, size=(n_tri, n_wav_b))
         obs_b.t3amp_err = rng.uniform(0.01, 0.05, size=(n_tri, n_wav_b))
         obs_b.t3_flag = np.zeros((n_tri, n_wav_b), dtype=bool)
+        return [obs_a, obs_b]
 
-        path = write_oifits([obs_a, obs_b], output_dir)
+    def test_different_wavelength_grids(
+        self, two_grid_observables, output_dir
+    ):
+        """Different wavelength grids produce multiple tables."""
+        path = write_oifits(two_grid_observables, output_dir)
         with fits.open(path) as hdul:
             wl_count = sum(
                 1
@@ -671,6 +675,32 @@ class TestWriteOifitsMultiBlock:
                 and h.header.get("EXTNAME") == "OI_VIS2"
             )
             assert vis2_count == 2
+
+    def test_insnames_match_wavelength_tables(
+        self, two_grid_observables, output_dir
+    ):
+        """Data tables reference the OI_WAVELENGTH of their grid."""
+        data_ext = ("OI_VIS2", "OI_VIS", "OI_T3")
+        path = write_oifits(two_grid_observables, output_dir)
+        with fits.open(path) as hdul:
+            wl_n_wav = {
+                h.header["INSNAME"]: len(h.data["EFF_WAVE"])
+                for h in hdul
+                if h.header.get("EXTNAME") == "OI_WAVELENGTH"
+            }
+            data_names = {
+                h.header["INSNAME"]
+                for h in hdul
+                if h.header.get("EXTNAME") in data_ext
+            }
+            vis2_n_wav = {
+                h.header["INSNAME"]: h.data["VIS2DATA"].shape[1]
+                for h in hdul
+                if h.header.get("EXTNAME") == "OI_VIS2"
+            }
+        assert set(wl_n_wav) == {"ALES_NRM", "ALES_NRM_1"}
+        assert data_names == set(wl_n_wav)
+        assert vis2_n_wav == wl_n_wav
 
     def test_mixed_obs_some_without_vis2(
         self, full_observables, minimal_observables, output_dir

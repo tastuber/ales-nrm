@@ -78,13 +78,13 @@ def write_oifits(
     hdu_list.append(_build_oi_target(observables_list, target_id_map))
     hdu_list.append(_build_oi_array(observables_list[0].stations, arrname))
 
-    # Build wavelength tables (one per unique grid)
-    wl_tables = _build_oi_wavelength_tables(observables_list, _BASE_INSNAME)
+    # Assign one INSNAME per unique wavelength grid
+    insname_map = _build_insname_map(observables_list, _BASE_INSNAME)
+
+    # Build wavelength tables (one per INSNAME)
+    wl_tables = _build_oi_wavelength_tables(observables_list, insname_map)
     for wl_hdu in wl_tables:
         hdu_list.append(wl_hdu)
-
-    # Build insname map for data tables
-    insname_map = _build_insname_map(observables_list, _BASE_INSNAME)
 
     # Data tables (one per insname when grids differ)
     for hdu in _build_oi_vis2(
@@ -543,24 +543,25 @@ def _build_oi_array(
 
 def _build_oi_wavelength_tables(
     observables_list: list[Observables],
-    base_insname: str,
+    insname_map: dict[int, str],
 ) -> list[fits.BinTableHDU]:
-    """Build OI_WAVELENGTH tables for unique wavelength grids."""
-    grids: dict[str, tuple[np.ndarray, str]] = {}
-    counter = 0
+    """Build one OI_WAVELENGTH table per INSNAME.
 
-    for obs in observables_list:
-        key = _wavelength_grid_key(obs.wavelengths)
-        if key not in grids:
-            if counter == 0:
-                ins = base_insname
-            else:
-                ins = f"{base_insname}_{counter}"
-            grids[key] = (obs.wavelengths, ins)
-            counter += 1
+    Args:
+        observables_list: Observables to write.
+        insname_map: Mapping from index in ``observables_list`` to
+            INSNAME, as returned by ``_build_insname_map``.
+
+    Returns:
+        OI_WAVELENGTH tables in order of first appearance of each
+        INSNAME.
+    """
+    grids: dict[str, np.ndarray] = {}
+    for i, obs in enumerate(observables_list):
+        grids.setdefault(insname_map[i], obs.wavelengths)
 
     tables = []
-    for _key, (wavelengths, ins) in grids.items():
+    for ins, wavelengths in grids.items():
         eff_wave = wavelengths * 1e-6
 
         if len(wavelengths) > 1:
