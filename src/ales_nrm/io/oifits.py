@@ -23,6 +23,9 @@ from ales_nrm.observables import (
     TriangleInfo,
 )
 
+# Base INSNAME; further wavelength grids get "_1", "_2", ...
+_BASE_INSNAME = "ALES_NRM"
+
 
 def write_oifits(
     observables: "Observables | list[Observables]",
@@ -68,7 +71,6 @@ def write_oifits(
 
     # Determine array and wavelength configurations
     arrname = _get_arrname(observables_list)
-    insname = _get_insname(observables_list)
 
     # Build HDU list
     hdu_list = fits.HDUList()
@@ -77,12 +79,12 @@ def write_oifits(
     hdu_list.append(_build_oi_array(observables_list[0].stations, arrname))
 
     # Build wavelength tables (one per unique grid)
-    wl_tables = _build_oi_wavelength_tables(observables_list, insname)
+    wl_tables = _build_oi_wavelength_tables(observables_list, _BASE_INSNAME)
     for wl_hdu in wl_tables:
         hdu_list.append(wl_hdu)
 
     # Build insname map for data tables
-    insname_map = _build_insname_map(observables_list, insname)
+    insname_map = _build_insname_map(observables_list, _BASE_INSNAME)
 
     # Data tables (one per insname when grids differ)
     for hdu in _build_oi_vis2(
@@ -150,7 +152,7 @@ def read_oifits(filepath: str | Path) -> list[Observables]:
         for (target_id, mjd), group_data in groups.items():
             target_name = target_map.get(target_id, "UNKNOWN")
             # Determine which insname this group uses
-            insname_key = group_data.get("insname", "ALES_NRM")
+            insname_key = group_data.get("insname", _BASE_INSNAME)
             wl_info = wavelength_map.get(insname_key)
             if wl_info is None:
                 # Fallback to first available
@@ -287,11 +289,6 @@ def _get_arrname(observables_list: list[Observables]) -> str:
         if obs.mask_name:
             return obs.mask_name
     return "UNKNOWN"
-
-
-def _get_insname(observables_list: list[Observables]) -> str:
-    """Get base INSNAME."""
-    return "ALES_NRM"
 
 
 def _build_insname_map(
@@ -1217,7 +1214,7 @@ def _parse_oi_wavelength(
             hasattr(hdu, "header")
             and hdu.header.get("EXTNAME") == "OI_WAVELENGTH"
         ):
-            ins = hdu.header.get("INSNAME", "ALES_NRM")
+            ins = hdu.header.get("INSNAME", _BASE_INSNAME)
             result[ins] = {
                 "eff_wave": np.array(hdu.data["EFF_WAVE"], dtype=np.float64),
                 "eff_band": np.array(hdu.data["EFF_BAND"], dtype=np.float64),
