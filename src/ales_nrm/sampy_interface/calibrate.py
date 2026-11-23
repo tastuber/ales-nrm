@@ -26,6 +26,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Observable keys this backend can calibrate.
+_SUPPORTED_OBSERVABLES = frozenset({"t3phi", "vis2"})
+
 
 def _validate_raw_extraction(
     block: "ObservingBlock",

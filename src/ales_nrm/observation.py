@@ -1094,11 +1094,12 @@ class ObservingBlock:
 
         if backend == "sampy":
             from ales_nrm.sampy_interface.calibrate import (
+                _SUPPORTED_OBSERVABLES,
                 calibrate_block,
             )
 
             # Warn if unsupported observables requested
-            unsupported = calibrate_set & {"visphi", "visamp"}
+            unsupported = calibrate_set - _SUPPORTED_OBSERVABLES
             if unsupported:
                 warnings.warn(
                     "SAMpy backend does not support calibrating "
