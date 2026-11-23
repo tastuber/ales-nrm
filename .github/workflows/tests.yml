@@ -27,7 +27,7 @@ jobs:
           pip install --group lint
 
       - name: Ruff lint
-        run: ruff check .
+        run: ruff check . --output-format=github
 
       - name: Ruff format
         run: ruff format --check .
