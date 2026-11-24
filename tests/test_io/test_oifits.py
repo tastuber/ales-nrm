@@ -1,6 +1,7 @@
 """Tests for OIFITS2 writer and reader."""
 
 import copy
+import warnings
 
 import numpy as np
 import pytest
@@ -19,6 +20,7 @@ from ales_nrm.io.oifits import (
     _reconstruct_baselines,
     _reconstruct_triangles,
     _sanitize_target_name,
+    _set_string_card,
     generate_oifits_filename,
     read_oifits,
     write_oifits,
@@ -744,6 +746,32 @@ class TestWriteOifitsEdgeCases:
             assert hdr["NS_CALST"] == "calibrated"
             assert hdr["NS_CALTG"] == "HD_12345"
             assert "poly_order" in hdr["NS_CALMT"]
+            assert hdr.comments["NS_CALMT"] == "Calibration method"
+
+    def test_long_notes_written_in_full(self, full_observables, output_dir):
+        """Notes longer than one card are written without truncation."""
+        obs = copy.deepcopy(full_observables)
+        obs.calibrated = True
+        obs.notes = "x" * 120
+        path = write_oifits(obs, output_dir)
+        with fits.open(path) as hdul:
+            assert hdul[0].header["NS_CALMT"] == "x" * 120
+            assert hdul[0].header.comments["NS_CALMT"] == "Calibration method"
+
+    def test_card_filling_notes_keep_comment(
+        self, full_observables, output_dir
+    ):
+        """Notes filling one card keep value and comment, no warning."""
+        obs = copy.deepcopy(full_observables)
+        obs.calibrated = True
+        obs.notes = "method='constant', n_calibrators=2, source_label='raw'"
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            path = write_oifits(obs, output_dir)
+        with fits.open(path) as hdul:
+            hdr = hdul[0].header
+            assert hdr["NS_CALMT"] == obs.notes
+            assert hdr.comments["NS_CALMT"] == "Calibration method"
 
     def test_category_cal(self, full_observables, output_dir):
         """CATEGORY column set to CAL for calibrator block."""
@@ -972,6 +1000,16 @@ class TestReadOifits:
         result = read_oifits(path)[0]
         assert result.calibrated is True
         assert result.calibrator_target == "HD_12345"
+
+    def test_long_notes_round_trip(self, full_observables, output_dir):
+        """Long notes with quotes survive a round trip."""
+        notes = ", ".join(f"key{i}='value{i}'" for i in range(10))
+        obs = copy.deepcopy(full_observables)
+        obs.calibrated = True
+        obs.notes = notes
+        path = write_oifits(obs, output_dir)
+        result = read_oifits(path)[0]
+        assert result.notes == notes
 
     def test_block_type_from_category(self, full_observables, output_dir):
         """Block type derived from CATEGORY column."""
@@ -1532,6 +1570,27 @@ class TestInternalHelpers:
         hdu = _build_primary_hdu([obs], {"alpha_Cen": 1})
         assert "NS_CALTG" not in hdu.header
         assert "NS_CALMT" not in hdu.header
+
+    @pytest.mark.parametrize(
+        ("value", "wrapped"),
+        [
+            ("short", False),
+            ("method='constant', n_calibrators=2, source_label='raw'", True),
+            ("x" * 120, True),
+        ],
+        ids=["short", "fills_card", "long"],
+    )
+    def test_set_string_card(self, value, wrapped):
+        """Value and full comment survive; no warning is issued."""
+        header = fits.Header()
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            _set_string_card(header, "NS_TEST", value, "Calibration method")
+            text = header.tostring()
+        assert ("CONTINUE" in text) is wrapped
+        parsed = fits.Header.fromstring(text)
+        assert parsed["NS_TEST"] == value
+        assert parsed.comments["NS_TEST"] == "Calibration method"
 
     @pytest.mark.parametrize(
         ("func", "row_key", "n_limit", "n_wav", "expected_len"),

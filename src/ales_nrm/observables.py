@@ -122,7 +122,7 @@ class Observables:
         extraction_backend: Name of extraction backend, e.g. "sampy".
         block_type: "SCI" or "CAL".
         mask_name: Name of the mask used.
-        notes: Free-form notes string.
+        notes: Calibration notes; empty for uncalibrated data.
     """
 
     # Metadata

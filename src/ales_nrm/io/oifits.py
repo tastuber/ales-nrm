@@ -25,6 +25,12 @@ from ales_nrm.observables import (
 
 # Base INSNAME; further wavelength grids get "_1", "_2", ...
 _BASE_INSNAME = "ALES_NRM"
+# FITS card length, the column up to which astropy pads short values
+# before a comment, and the longest string value (quotes doubled)
+# that fits on one card: 80 - 10 (keyword field) - 2 (quotes).
+_FITS_CARD_LENGTH = 80
+_FITS_MIN_VALUE_END = 30
+_FITS_MAX_STRING_LEN = 68
 
 
 def write_oifits(
@@ -318,6 +324,37 @@ def _wavelength_grid_key(wavelengths: np.ndarray) -> str:
     return f"{len(wavelengths)}_{wavelengths[0]:.8f}_{wavelengths[-1]:.8f}"
 
 
+def _set_string_card(
+    header: fits.Header,
+    key: str,
+    value: str,
+    comment: str,
+) -> None:
+    """Set a string card and keep its comment at any value length.
+
+    Long values are wrapped by astropy with CONTINUE cards, and the
+    comment goes on the last card. A value that fits on one card but
+    leaves no room for the comment would make astropy truncate the
+    comment. Such a value is padded with trailing spaces, so that it
+    is wrapped as well. Trailing spaces in FITS strings are not
+    significant and are removed on read.
+
+    Args:
+        header: Header to modify.
+        key: Keyword name (at most 8 characters).
+        value: String value.
+        comment: Comment to write.
+    """
+    image_len = len(str(fits.Card(key, value)).rstrip())
+    value_end = max(image_len, _FITS_MIN_VALUE_END)
+    single_card = image_len <= _FITS_CARD_LENGTH
+    comment_fits = value_end + len(" / ") + len(comment) <= _FITS_CARD_LENGTH
+    if single_card and not comment_fits:
+        # Force CONTINUE wrapping; doubled quotes only lengthen it.
+        value = value.ljust(_FITS_MAX_STRING_LEN + 1)
+    header[key] = (value, comment)
+
+
 def _build_primary_hdu(
     observables_list: list[Observables],
     target_id_map: dict[str, int],
@@ -404,10 +441,7 @@ def _build_primary_hdu(
         )
 
     if obs0.notes:
-        header["NS_CALMT"] = (
-            obs0.notes[:68],
-            "Calibration method",
-        )
+        _set_string_card(header, "NS_CALMT", obs0.notes, "Calibration method")
 
     if obs0.mask_name:
         header["NS_MASK"] = (obs0.mask_name, "Mask name")
