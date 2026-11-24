@@ -209,6 +209,34 @@ class TestNRMMaskFromFile:
         assert mask.angle_deg == 0.0
 
 
+class TestTelescopeName:
+    """Tests for NRMMask.telescope_name."""
+
+    @pytest.mark.parametrize(
+        ("source_name", "expected"),
+        [
+            ("lbti_nrm6_sx", "LBT_SX"),
+            ("lbti_nrm6_dx", "LBT_DX"),
+            ("MY_MASK_DX", "LBT_DX"),
+            ("my_custom_mask", "LBT"),
+            ("", "LBT"),
+        ],
+        ids=["sx", "dx", "upper_case", "custom", "empty"],
+    )
+    def test_from_source_name(self, source_name, expected):
+        """The side comes from the name suffix, otherwise LBT."""
+        mask = NRMMask(primary_diameter=8.4, source_name=source_name)
+        assert mask.telescope_name == expected
+
+    @pytest.mark.parametrize(
+        ("name", "expected"),
+        [("lbti_nrm6_sx", "LBT_SX"), ("lbti_nrm6_dx", "LBT_DX")],
+    )
+    def test_bundled_masks(self, name, expected):
+        """Bundled masks map to their telescope side."""
+        assert NRMMask.from_bundled(name).telescope_name == expected
+
+
 class TestMaskRotationAtLoad:
     """Tests for angle_deg parameter in factory methods."""
 

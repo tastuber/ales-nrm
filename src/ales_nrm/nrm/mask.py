@@ -21,6 +21,11 @@ logger = logging.getLogger(__name__)
 # ALES pixel scale in arcseconds per pixel.
 ALES_PIXEL_SCALE_ARCSEC = 0.0345
 
+# Telescope names (OI_ARRAY TEL_NAME) by mask file name suffix, and the
+# name used when the suffix identifies no telescope side.
+_TELESCOPE_BY_SUFFIX = (("_sx", "LBT_SX"), ("_dx", "LBT_DX"))
+_FALLBACK_TELESCOPE = "LBT"
+
 
 @dataclass
 class Hole:
@@ -104,6 +109,19 @@ class NRMMask:
         """Number of closing triangles."""
         n = self.n_holes
         return n * (n - 1) * (n - 2) // 6
+
+    @property
+    def telescope_name(self) -> str:
+        """Telescope name derived from the mask file name.
+
+        Returns ``'LBT_SX'`` or ``'LBT_DX'`` if ``source_name`` ends
+        in ``'_sx'`` or ``'_dx'`` (case-insensitive), else ``'LBT'``.
+        """
+        name = self.source_name.lower()
+        for suffix, telescope in _TELESCOPE_BY_SUFFIX:
+            if name.endswith(suffix):
+                return telescope
+        return _FALLBACK_TELESCOPE
 
     @classmethod
     def from_file(

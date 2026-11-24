@@ -122,6 +122,9 @@ class Observables:
         extraction_backend: Name of extraction backend, e.g. "sampy".
         block_type: "SCI" or "CAL".
         mask_name: Name of the mask used.
+        telescope: Telescope name for OI_ARRAY ``TEL_NAME``, e.g.
+            "LBT_SX". Derived from the mask; empty if unknown (written
+            as "LBT").
         notes: Calibration notes; empty for uncalibrated data.
     """
 
@@ -163,6 +166,7 @@ class Observables:
     extraction_backend: str = ""
     block_type: str = ""
     mask_name: str = ""
+    telescope: str = ""
     notes: str = ""
 
     @property
@@ -343,6 +347,7 @@ class Observables:
             f"  Backend: {self.extraction_backend or 'unknown'}",
             f"  Block type: {self.block_type or 'unknown'}",
             f"  Mask: {self.mask_name or 'unknown'}",
+            f"  Telescope: {self.telescope or 'unknown'}",
             f"  Calibrated: {self.calibrated}",
             f"  Stations: {self.n_stations}",
             f"  Baselines: {self.n_baselines}",
@@ -490,4 +495,5 @@ class Observables:
             time_end=time_end,
             block_type=block_type,
             mask_name=mask.source_name,
+            telescope=mask.telescope_name,
         )

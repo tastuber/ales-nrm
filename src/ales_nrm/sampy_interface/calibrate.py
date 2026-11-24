@@ -245,6 +245,7 @@ def calibrate_block(
         time_end=source_obs.time_end,
         block_type=source_obs.block_type,
         mask_name=source_obs.mask_name,
+        telescope=source_obs.telescope,
     )
 
     # Add calibration and backend information to Observables

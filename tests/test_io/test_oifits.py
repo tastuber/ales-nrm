@@ -890,6 +890,22 @@ class TestWriteOifitsEdgeCases:
         with fits.open(path) as hdul:
             assert hdul["OI_ARRAY"].header["ARRNAME"] == "UNKNOWN"
 
+    @pytest.mark.parametrize(
+        ("telescope", "expected"),
+        [("LBT_DX", "LBT_DX"), ("", "LBT")],
+        ids=["dx", "empty_fallback"],
+    )
+    def test_tel_name_from_telescope(
+        self, full_observables, output_dir, telescope, expected
+    ):
+        """TEL_NAME is the telescope of the first Observables."""
+        obs = copy.deepcopy(full_observables)
+        obs.telescope = telescope
+        path = write_oifits(obs, output_dir)
+        with fits.open(path) as hdul:
+            tel_names = hdul["OI_ARRAY"].data["TEL_NAME"]
+            assert [t.strip() for t in tel_names] == [expected] * 3
+
     def test_empty_notes_no_ns_calmt(self, full_observables, output_dir):
         """Empty notes does not write NS_CALMT."""
         obs = copy.deepcopy(full_observables)
@@ -1010,6 +1026,13 @@ class TestReadOifits:
         path = write_oifits(obs, output_dir)
         result = read_oifits(path)[0]
         assert result.notes == notes
+
+    def test_telescope_round_trip(self, full_observables, output_dir):
+        """Telescope name survives a round trip."""
+        obs = copy.deepcopy(full_observables)
+        obs.telescope = "LBT_DX"
+        path = write_oifits(obs, output_dir)
+        assert read_oifits(path)[0].telescope == "LBT_DX"
 
     def test_block_type_from_category(self, full_observables, output_dir):
         """Block type derived from CATEGORY column."""

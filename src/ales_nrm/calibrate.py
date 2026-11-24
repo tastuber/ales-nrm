@@ -563,6 +563,7 @@ def calibrate_block(
         time_end=sci_obs.time_end,
         block_type=sci_obs.block_type,
         mask_name=sci_obs.mask_name,
+        telescope=sci_obs.telescope,
         calibrated=True,
         calibrator_target=calibrator_target,
         extraction_backend="native",

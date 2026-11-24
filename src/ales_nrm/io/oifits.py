@@ -16,6 +16,7 @@ from astropy.io import fits
 from astropy.time import Time
 
 from ales_nrm import __version__
+from ales_nrm.nrm.mask import _FALLBACK_TELESCOPE
 from ales_nrm.observables import (
     BaselineInfo,
     Observables,
@@ -82,7 +83,10 @@ def write_oifits(
     hdu_list = fits.HDUList()
     hdu_list.append(_build_primary_hdu(observables_list, target_id_map))
     hdu_list.append(_build_oi_target(observables_list, target_id_map))
-    hdu_list.append(_build_oi_array(observables_list[0].stations, arrname))
+    # OI_ARRAY describes the first Observables only
+    obs0 = observables_list[0]
+    tel_name = obs0.telescope or _FALLBACK_TELESCOPE
+    hdu_list.append(_build_oi_array(obs0.stations, arrname, tel_name))
 
     # Assign one INSNAME per unique wavelength grid
     insname_map = _build_insname_map(observables_list, _BASE_INSNAME)
@@ -141,7 +145,7 @@ def read_oifits(filepath: str | Path) -> list[Observables]:
 
         # Parse supporting tables
         target_map = _parse_oi_target(hdul)
-        station_map = _parse_oi_array(hdul)
+        array_map = _parse_oi_array(hdul)
         wavelength_map = _parse_oi_wavelength(hdul)
 
         # Parse metadata from primary header
@@ -168,9 +172,11 @@ def read_oifits(filepath: str | Path) -> list[Observables]:
             wavelengths_um = wavelengths_m * 1e6
             n_wav = len(wavelengths_um)
 
-            # Get stations for this group
+            # Get stations and telescope for this group
             arr = group_data.get("arrname", "")
-            stations = station_map.get(arr, next(iter(station_map.values())))
+            stations, telescope = array_map.get(
+                arr, next(iter(array_map.values()))
+            )
 
             # Reconstruct baselines from vis2 or vis data
             baselines = _reconstruct_baselines(group_data, stations)
@@ -228,6 +234,7 @@ def read_oifits(filepath: str | Path) -> list[Observables]:
                 calibrator_target=cal_target,
                 block_type=block_type,
                 mask_name=mask_name,
+                telescope=telescope,
                 notes=notes,
             )
             result.append(obs)
@@ -538,10 +545,20 @@ def _build_oi_target(
 def _build_oi_array(
     stations: list[Station],
     arrname: str,
+    telescope: str,
 ) -> fits.BinTableHDU:
-    """Build OI_ARRAY table for a mask."""
+    """Build OI_ARRAY table for a mask.
+
+    Args:
+        stations: Stations (mask holes) to write.
+        arrname: Array name.
+        telescope: TEL_NAME written for every station.
+
+    Returns:
+        The OI_ARRAY table.
+    """
     n_sta = len(stations)
-    tel_name = np.array(["LBT_SX"] * n_sta)
+    tel_name = np.array([telescope] * n_sta)
     sta_name = np.array([s.name for s in stations])
     sta_index = np.array([s.index for s in stations], dtype=np.int16)
     diameter = np.array([s.diameter for s in stations], dtype=np.float32)
@@ -1216,8 +1233,12 @@ def _parse_oi_target(
 
 def _parse_oi_array(
     hdul: fits.HDUList,
-) -> dict[str, list[Station]]:
-    """Parse OI_ARRAY tables into arrname -> stations mapping."""
+) -> dict[str, tuple[list[Station], str]]:
+    """Parse OI_ARRAY tables into arrname -> (stations, telescope).
+
+    The telescope is the TEL_NAME of the first station; ales-nrm
+    writes the same TEL_NAME for all stations of a table.
+    """
     result = {}
     for hdu in hdul:
         if hasattr(hdu, "header") and hdu.header.get("EXTNAME") == "OI_ARRAY":
@@ -1235,7 +1256,9 @@ def _parse_oi_array(
                         diameter=float(row["DIAMETER"]),
                     )
                 )
-            result[arrname] = stations
+            tel_names = hdu.data["TEL_NAME"]
+            telescope = str(tel_names[0]).strip() if len(tel_names) else ""
+            result[arrname] = (stations, telescope)
     return result
 
 

@@ -583,6 +583,12 @@ class TestObservablesSummary:
         s = sample_observables.summary()
         assert "Notes" not in s
 
+    def test_summary_shows_telescope(self, sample_observables):
+        """Summary shows the telescope, or 'unknown' if empty."""
+        assert "Telescope: unknown" in sample_observables.summary()
+        sample_observables.telescope = "LBT_DX"
+        assert "Telescope: LBT_DX" in sample_observables.summary()
+
 
 class TestFromBlockAndMask:
     """Tests for Observables.from_block_and_mask factory method."""
@@ -726,6 +732,19 @@ class TestFromBlockAndMask:
         """mask_name comes from mask.source_name."""
         obs = Observables.from_block_and_mask(mock_block, four_hole_mask)
         assert obs.mask_name == "test_mask"
+
+    @pytest.mark.parametrize(
+        ("source_name", "expected"),
+        [("test_mask", "LBT"), ("test_mask_dx", "LBT_DX")],
+        ids=["custom", "dx"],
+    )
+    def test_telescope_from_mask(
+        self, mock_block, four_hole_mask, source_name, expected
+    ):
+        """Telescope comes from mask.telescope_name."""
+        four_hole_mask.source_name = source_name
+        obs = Observables.from_block_and_mask(mock_block, four_hole_mask)
+        assert obs.telescope == expected
 
     def test_data_arrays_are_none(self, mock_block, four_hole_mask):
         """All observable arrays are None after factory."""
