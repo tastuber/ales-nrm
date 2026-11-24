@@ -11,8 +11,8 @@ from ales_nrm.utilities import (
 )
 
 if TYPE_CHECKING:
+    from ales_nrm.nrm.mask import NRMMask
     from ales_nrm.observation import ObservingBlock
-from ales_nrm.nrm.mask import NRMMask
 
 
 @dataclass(frozen=True)
